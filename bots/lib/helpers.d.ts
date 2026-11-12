@@ -2,7 +2,7 @@ import type { BotState, Dir, Memory, Pos } from "./api";
 
 export declare const DIRS: Record<Dir, Pos>;
 export declare const COSTS: Record<
-  "worker" | "fighter" | "scout" | "turret" | "wall" | "cargo" | "armor" | "weapons",
+  "worker" | "fighter" | "scout" | "turret" | "wall" | "base" | "cargo" | "armor" | "weapons" | "scoutSpeed",
   { energy: number; crystal: number }
 >;
 export declare function distance(a: Pos, b: Pos): number;

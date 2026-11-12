@@ -5,3 +5,10 @@ packages:
   - viewer
   - server
   - bots
+
+allowBuilds:
+  isolated-vm: true
+  esbuild: true
+
+# Install dependencies explicitly, not when starting the browser playground.
+verifyDepsBeforeRun: false

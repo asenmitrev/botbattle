@@ -8,6 +8,7 @@ export {
   cloneState,
   computeScore,
   cargoCapacity,
+  unitSpeed,
   unitValue,
   zoneRadius,
   zoneCenter,

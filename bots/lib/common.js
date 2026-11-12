@@ -53,7 +53,8 @@ export function assignNode(state, memory, u, type, maxPerNode = 3) {
   for (const n of knownNodes(memory, type)) {
     const c = counts[n.id] || 0;
     if (c >= maxPerNode) continue;
-    const key = [c, distance(n, state.myBase), manhattan(n, u), n.id];
+    const base = nearest(n, state.myBases || [state.myBase]) || state.myBase;
+    const key = [c, distance(n, base), manhattan(n, u), n.id];
     if (!bestKey || compareKeys(key, bestKey) < 0) {
       best = n;
       bestKey = key;
@@ -75,7 +76,7 @@ function compareKeys(a, b) {
  */
 export function workerAct(state, memory, u, node) {
   const carried = u.cargo.energy + u.cargo.crystal;
-  const base = state.myBase;
+  const base = nearest(u, state.myBases || [state.myBase]) || state.myBase;
   const ticksLeft = state.maxTicks - state.tick;
   const homeward =
     carried >= u.cargoCapacity ||

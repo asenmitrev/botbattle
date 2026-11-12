@@ -443,7 +443,7 @@ function renderStats(s: GameState): void {
   const turrets = (p: PlayerId) => s.structures.filter((x) => x.owner === p && x.type === "turret").length;
   const ups = (p: PlayerId) => {
     const u = s.players[p - 1]!.upgrades;
-    return [u.cargo ? "C" : "", u.armor ? "A" : "", u.weapons ? "W" : ""].join("") || "–";
+    return [u.cargo ? "C" : "", u.armor ? "A" : "", u.weapons ? "W" : "", u.scoutSpeed ? "Scout Speed" : ""].filter(Boolean).join(" ") || "–";
   };
   const row = (label: string, f: (p: PlayerId) => string | number) => `<tr><td>${label}</td><td>${f(1)}</td><td>${f(2)}</td></tr>`;
   $("stats").innerHTML = `
@@ -455,7 +455,8 @@ function renderStats(s: GameState): void {
         ${row("Score", (p) => sc[p - 1]![t] ?? 0)}
         ${row("Energy", (p) => s.players[p - 1]!.energy)}
         ${row("Crystal", (p) => s.players[p - 1]!.crystal)}
-        ${row("Base HP", (p) => s.bases[p - 1]!.hp)}
+        ${row("Bases", (p) => s.bases.filter((b) => b.owner === p && b.hp > 0).length)}
+        ${row("Base HP", (p) => s.bases.reduce((hp, b) => hp + (b.owner === p ? Math.max(0, b.hp) : 0), 0))}
         ${row("Workers", (p) => count(p, "worker"))}
         ${row("Fighters", (p) => count(p, "fighter"))}
         ${row("Scouts", (p) => count(p, "scout"))}
@@ -537,7 +538,7 @@ $("board").addEventListener("mousemove", (e) => {
   const parts = [`(${p.x}, ${p.y})`];
   const at = (o: { x: number; y: number }) => o.x === p.x && o.y === p.y;
   for (const n of s.nodes.filter(at)) parts.push(`${n.type} node #${n.id}: ${n.amount}`);
-  for (const b of s.bases.filter(at)) parts.push(`P${b.owner} base #${b.id}: ${b.hp} HP`);
+  for (const b of s.bases.filter((b) => b.hp > 0 && at(b))) parts.push(`P${b.owner} base #${b.id}: ${b.hp} HP`);
   for (const x of s.structures.filter(at)) parts.push(`P${x.owner} ${x.type} #${x.id}: ${x.hp} HP`);
   for (const u of s.units.filter(at)) {
     const cargo = u.cargo.energy || u.cargo.crystal ? ` cargo ${u.cargo.energy}E ${u.cargo.crystal}C` : "";

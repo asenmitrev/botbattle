@@ -1,4 +1,4 @@
-import type { NodeType, StructureType, UnitType, UpgradeType } from "./config.js";
+import type { BuildType, NodeType, StructureType, UnitType, UpgradeType } from "./config.js";
 
 export type PlayerId = 1 | 2;
 export type Dir = "N" | "S" | "E" | "W";
@@ -54,6 +54,7 @@ export interface Upgrades {
   cargo: boolean;
   armor: boolean;
   weapons: boolean;
+  scoutSpeed: boolean;
 }
 
 export interface PlayerState {
@@ -80,7 +81,8 @@ export interface GameState {
   seed: number;
   map: GameMap;
   nodes: ResourceNode[];
-  bases: [Base, Base];
+  /** Initial bases first, then expansions. Destroyed bases remain with hp 0 for replay history. */
+  bases: Base[];
   players: [PlayerState, PlayerState];
   units: Unit[];
   structures: Structure[];
@@ -96,8 +98,8 @@ export type Action =
   | { type: "harvest"; unitId: number; nodeId: number }
   | { type: "deposit"; unitId: number }
   | { type: "attack"; unitId: number; targetId: number }
-  | { type: "build"; unitId: number; structure: StructureType; x: number; y: number }
-  | { type: "spawn"; unit: UnitType }
+  | { type: "build"; unitId: number; structure: BuildType; x: number; y: number }
+  | { type: "spawn"; unit: UnitType; baseId?: number }
   | { type: "upgrade"; upgrade: UpgradeType }
   | { type: "log"; text: string }
   | { type: "mark"; x: number; y: number; color?: string; label?: string };
@@ -112,11 +114,11 @@ export type GameEvent =
   | { type: "upgrade"; player: PlayerId; upgrade: UpgradeType }
   | { type: "harvest"; player: PlayerId; unitId: number; nodeId: number; resource: NodeType; amount: number }
   | { type: "deposit"; player: PlayerId; unitId: number; energy: number; crystal: number }
-  | { type: "build"; player: PlayerId; unitId: number; structureId: number; structure: StructureType; x: number; y: number }
+  | { type: "build"; player: PlayerId; unitId: number; structureId: number; structure: BuildType; x: number; y: number }
   | { type: "attack"; attackerId: number; targetId: number; damage: number }
   | { type: "zone_damage"; targetId: number; damage: number }
   | { type: "death"; id: number; kind: EntityKind; owner: PlayerId; x: number; y: number }
-  | { type: "base_destroyed"; player: PlayerId }
+  | { type: "base_destroyed"; player: PlayerId; baseId?: number }
   | { type: "log"; player: PlayerId; text: string }
   | { type: "mark"; player: PlayerId; x: number; y: number; color: string; label: string }
   | { type: "bot_error"; player: PlayerId; message: string }

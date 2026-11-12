@@ -22,7 +22,7 @@ export function createInitialState(seed: number): GameState {
     id,
     energy: CONFIG.match.startEnergy,
     crystal: CONFIG.match.startCrystal,
-    upgrades: { cargo: false, armor: false, weapons: false },
+    upgrades: { cargo: false, armor: false, weapons: false, scoutSpeed: false },
   });
 
   const state: GameState = {
@@ -57,24 +57,27 @@ export function occupancy(state: GameState, includeUnits = true): Uint8Array {
   const size = state.map.size;
   const occ = new Uint8Array(size * size);
   for (let i = 0; i < occ.length; i++) if (state.map.tiles[i] !== TILE.floor) occ[i] = 1;
-  for (const b of state.bases) occ[b.y * size + b.x] = 1;
+  for (const b of state.bases) if (b.hp > 0) occ[b.y * size + b.x] = 1;
   for (const s of state.structures) occ[s.y * size + s.x] = 1;
   if (includeUnits) for (const u of state.units) occ[u.y * size + u.x] = 1;
   return occ;
 }
 
 /**
- * First free tile adjacent to the player's base, scanning ADJ8 in order.
+ * First free tile adjacent to a living friendly base, in base-ID then ADJ8 order.
  * Player 2 negates the offsets so spawn placement is point-symmetric.
  */
-export function findSpawnTile(state: GameState, owner: PlayerId, occ = occupancy(state)): Pos | null {
-  const base = state.bases[owner - 1]!;
+export function findSpawnTile(state: GameState, owner: PlayerId, occ = occupancy(state), baseId?: number): Pos | null {
+  const bases = state.bases.filter((b) => b.owner === owner && b.hp > 0 && (baseId === undefined || b.id === baseId))
+    .sort((a, b) => a.id - b.id);
   const sign = owner === 1 ? 1 : -1;
   const size = state.map.size;
-  for (const o of ADJ8) {
-    const x = base.x + sign * o.x;
-    const y = base.y + sign * o.y;
-    if (inBounds(size, x, y) && !occ[y * size + x]) return { x, y };
+  for (const base of bases) {
+    for (const o of ADJ8) {
+      const x = base.x + sign * o.x;
+      const y = base.y + sign * o.y;
+      if (inBounds(size, x, y) && !occ[y * size + x]) return { x, y };
+    }
   }
   return null;
 }
@@ -85,7 +88,7 @@ export function cloneState(s: GameState): GameState {
     seed: s.seed,
     map: s.map, // immutable
     nodes: s.nodes.map((n) => ({ ...n })),
-    bases: [{ ...s.bases[0] }, { ...s.bases[1] }],
+    bases: s.bases.map((b) => ({ ...b })),
     players: [
       { ...s.players[0], upgrades: { ...s.players[0].upgrades } },
       { ...s.players[1], upgrades: { ...s.players[1].upgrades } },
@@ -105,6 +108,13 @@ export function cargoCapacity(state: GameState, owner: PlayerId, type: UnitType)
   return base + (state.players[owner - 1]!.upgrades.cargo ? CONFIG.upgrades.cargo.cargoBonus : 0);
 }
 
+export function unitSpeed(state: GameState, owner: PlayerId, type: UnitType): number {
+  const speed = CONFIG.units[type].speed;
+  return type === "scout" && state.players[owner - 1]!.upgrades.scoutSpeed
+    ? speed * CONFIG.upgrades.scoutSpeed.speedMultiplier
+    : speed;
+}
+
 export function unitValue(type: UnitType): number {
   const u = CONFIG.units[type];
   return u.costEnergy * CONFIG.score.energyWeight + u.costCrystal * CONFIG.score.crystalWeight;
@@ -115,7 +125,7 @@ export function computeScore(state: GameState, owner: PlayerId): number {
   const sc = CONFIG.score;
   let units = 0;
   for (const u of state.units) if (u.owner === owner) units += unitValue(u.type);
-  const baseHp = Math.max(0, state.bases[owner - 1]!.hp);
+  const baseHp = state.bases.reduce((hp, b) => hp + (b.owner === owner ? Math.max(0, b.hp) : 0), 0);
   return p.energy * sc.energyWeight + p.crystal * sc.crystalWeight + units * sc.unitValueWeight + baseHp * sc.baseHpWeight;
 }
 

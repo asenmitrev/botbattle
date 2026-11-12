@@ -133,6 +133,7 @@ export class BoardRenderer {
 
     // Bases
     for (const b of state.bases) {
+      if (b.hp <= 0) continue;
       const visible = seen(b.x, b.y) || b.owner === opts.fog;
       if (!visible) continue;
       ctx.fillStyle = playerColor(b.owner);
@@ -163,7 +164,7 @@ export class BoardRenderer {
       const tgt = turretTargets.get(s.id);
       if (tgt) this.turretAim.set(s.id, Math.atan2(tgt.y - s.y, tgt.x - s.x));
       else if (!this.turretAim.has(s.id)) {
-        const enemy = state.bases.find((b) => b.owner !== s.owner);
+        const enemy = state.bases.find((b) => b.owner !== s.owner && b.hp > 0);
         if (enemy) this.turretAim.set(s.id, Math.atan2(enemy.y - s.y, enemy.x - s.x));
       }
     }

@@ -1,7 +1,7 @@
 // Single source of game constants. RULES.md must stay in sync with this file.
 // Bump CONFIG_VERSION whenever any value below changes (replays record it).
 
-export const CONFIG_VERSION = "1.5.0";
+export const CONFIG_VERSION = "1.8.0";
 
 export const CONFIG = {
   map: {
@@ -32,7 +32,7 @@ export const CONFIG = {
     unitCap: 40,
   },
 
-  base: { hp: 200, vision: 7 },
+  base: { costEnergy: 100, hp: 200, vision: 7, maxDistFromBase: Infinity },
 
   units: {
     worker: { costEnergy: 50, costCrystal: 0, hp: 10, speed: 1, vision: 5, carry: 20, harvest: 5, damage: 0, range: 0 },
@@ -42,7 +42,7 @@ export const CONFIG = {
 
   structures: {
     turret: { costEnergy: 100, hp: 50, damage: 4, range: 4, vision: 4, maxDistFromBase: 8 },
-    wall: { costEnergy: 10, hp: 40, damage: 0, range: 0, vision: 0, maxDistFromBase: Infinity },
+    wall: { costEnergy: 5, hp: 60, damage: 0, range: 0, vision: 0, maxDistFromBase: Infinity },
   },
 
   nodes: {
@@ -54,6 +54,7 @@ export const CONFIG = {
     cargo: { costCrystal: 30, cargoBonus: 10 },
     armor: { costCrystal: 40, damageReduction: 2, minDamage: 1 },
     weapons: { costCrystal: 40, fighterDamageBonus: 3 },
+    scoutSpeed: { costCrystal: 15, speedMultiplier: 2 },
   },
 
   zone: {
@@ -107,9 +108,11 @@ export const CONFIG = {
 export type Config = typeof CONFIG;
 export type UnitType = keyof Config["units"];
 export type StructureType = keyof Config["structures"];
+export type BuildType = StructureType | "base";
 export type UpgradeType = keyof Config["upgrades"];
 export type NodeType = keyof Config["nodes"];
 
 export const UNIT_TYPES: readonly UnitType[] = ["worker", "fighter", "scout"];
 export const STRUCTURE_TYPES: readonly StructureType[] = ["turret", "wall"];
-export const UPGRADE_TYPES: readonly UpgradeType[] = ["cargo", "armor", "weapons"];
+export const BUILD_TYPES: readonly BuildType[] = [...STRUCTURE_TYPES, "base"];
+export const UPGRADE_TYPES: readonly UpgradeType[] = ["cargo", "armor", "weapons", "scoutSpeed"];

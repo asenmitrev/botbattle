@@ -83,9 +83,9 @@ describe("bot failures (in-process runner)", () => {
 describe("sample bot sanity", () => {
   it("the BOT_API.md example is bots/starter.js verbatim and beats idle", async () => {
     const fs = await import("node:fs");
-    const doc = fs.readFileSync(path.join(BOTS, "../BOT_API.md"), "utf8");
+    const doc = fs.readFileSync(path.join(BOTS, "../BOT_API.md"), "utf8").replace(/\r\n/g, "\n");
     const code = /## Minimal working bot \(no imports\)\n\n```js\n([\s\S]*?)```/.exec(doc)![1]!;
-    expect(fs.readFileSync(path.join(BOTS, "starter.js"), "utf8")).toContain(code);
+    expect(fs.readFileSync(path.join(BOTS, "starter.js"), "utf8").replace(/\r\n/g, "\n")).toContain(code);
     const { state, replay } = await play("starter", "idle", 3);
     expect(state.result!.winner).toBe(1);
     expect(replay.ticks.flatMap((t) => t.events).filter((e) => e.type === "invalid_action")).toHaveLength(0);

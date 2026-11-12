@@ -1,4 +1,4 @@
-import { CONFIG, STRUCTURE_TYPES, UNIT_TYPES, UPGRADE_TYPES, type StructureType, type UnitType, type UpgradeType } from "./config.js";
+import { BUILD_TYPES, CONFIG, UNIT_TYPES, UPGRADE_TYPES, type BuildType, type UnitType, type UpgradeType } from "./config.js";
 import { chebyshev, DIRS, DIR_ORDER_P1, DIR_ORDER_P2, dist2, distanceField, inBounds } from "./geometry.js";
 import {
   cargoCapacity,
@@ -7,6 +7,7 @@ import {
   findSpawnTile,
   makeUnit,
   occupancy,
+  unitSpeed,
   zoneCenter,
   zoneRadius,
 } from "./state.js";
@@ -17,7 +18,7 @@ type UnitAction = Extract<Action, { unitId: number }>;
 
 interface Intents {
   unit: Map<number, UnitAction>;
-  spawn: UnitType | null;
+  spawn: Extract<Action, { type: "spawn" }> | null;
   upgrades: UpgradeType[];
 }
 
@@ -55,10 +56,15 @@ export function step(prev: GameState, actionsP1: unknown, actionsP2: unknown): S
 
   // Phase 6: remove dead, check bases.
   removeDead(state, events);
-  const dead1 = state.bases[0].hp <= 0;
-  const dead2 = state.bases[1].hp <= 0;
-  if (dead1) events.push({ type: "base_destroyed", player: 1 });
-  if (dead2) events.push({ type: "base_destroyed", player: 2 });
+  const previousHp = new Map(prev.bases.map((b) => [b.id, b.hp]));
+  for (const b of state.bases) {
+    if (b.hp <= 0 && (previousHp.get(b.id) ?? CONFIG.base.hp) > 0) {
+      events.push({ type: "base_destroyed", player: b.owner, baseId: b.id });
+      events.push({ type: "death", id: b.id, kind: "base", owner: b.owner, x: b.x, y: b.y });
+    }
+  }
+  const dead1 = !state.bases.some((b) => b.owner === 1 && b.hp > 0);
+  const dead2 = !state.bases.some((b) => b.owner === 2 && b.hp > 0);
   if (dead1 || dead2) {
     const result = dead1 && dead2 ? endOfGameResult(state) : finishResult(state, dead1 ? 2 : 1, "base_destroyed");
     return finish(state, result, events);
@@ -95,7 +101,7 @@ function unitCounts(state: GameState): [number, number] {
   return c;
 }
 
-/** No single base fell: more living units wins; equal counts fall back to score; equal score is a draw. */
+/** Time limit or both players lost all bases: living units, then score, then draw. */
 function endOfGameResult(state: GameState): MatchResult {
   const s = scores(state);
   const n = unitCounts(state);
@@ -172,8 +178,10 @@ function collectIntents(state: GameState, player: PlayerId, raw: unknown, events
       }
       case "spawn": {
         if (!UNIT_TYPES.includes(act.unit as UnitType)) invalid(sanitize(act), "unknown unit type");
-        else if (intents.spawn !== null) invalid(sanitize(act), "only one spawn per tick");
-        else intents.spawn = act.unit as UnitType;
+        else if (act.baseId !== undefined && (!isInt(act.baseId) || !state.bases.some((b) => b.id === act.baseId && b.owner === player && b.hp > 0))) {
+          invalid(sanitize(act), "no such living base (or not yours)");
+        } else if (intents.spawn !== null) invalid(sanitize(act), "only one spawn per tick");
+        else intents.spawn = { type: "spawn", unit: act.unit as UnitType, ...(act.baseId !== undefined ? { baseId: act.baseId as number } : {}) };
         break;
       }
       case "upgrade": {
@@ -229,7 +237,7 @@ function validateUnitAction(a: Record<string, unknown>, units: Map<number, Unit>
       return isInt(a.targetId) ? null : "missing targetId";
     case "build":
       if (u.type !== "worker") return `${u.type} cannot build`;
-      if (!STRUCTURE_TYPES.includes(a.structure as StructureType)) return "unknown structure";
+      if (!BUILD_TYPES.includes(a.structure as BuildType)) return "unknown structure";
       return isInt(a.x) && isInt(a.y) && inBounds(size, a.x, a.y) ? null : "build position out of bounds";
   }
   return "unknown action type";
@@ -250,7 +258,7 @@ function normalizeUnitAction(a: Record<string, unknown>): UnitAction {
     case "attack":
       return { type: "attack", unitId, targetId: a.targetId as number };
     default:
-      return { type: "build", unitId, structure: a.structure as StructureType, x: a.x as number, y: a.y as number };
+      return { type: "build", unitId, structure: a.structure as BuildType, x: a.x as number, y: a.y as number };
   }
 }
 
@@ -283,16 +291,16 @@ function applyUpgrades(state: GameState, player: PlayerId, intents: Intents, eve
 }
 
 function applySpawn(state: GameState, player: PlayerId, intents: Intents, events: GameEvent[]): void {
-  const type = intents.spawn;
-  if (!type) return;
+  const action = intents.spawn;
+  if (!action) return;
+  const type = action.unit;
   const p = state.players[player - 1]!;
   const spec = CONFIG.units[type];
-  const action = { type: "spawn", unit: type };
   const fail = (reason: string) => events.push({ type: "invalid_action", player, action, reason });
   const count = state.units.reduce((n, u) => n + (u.owner === player ? 1 : 0), 0);
   if (count >= CONFIG.match.unitCap) return void fail("unit cap reached");
   if (p.energy < spec.costEnergy || p.crystal < spec.costCrystal) return void fail("not enough resources");
-  const tile = findSpawnTile(state, player);
+  const tile = findSpawnTile(state, player, undefined, action.baseId);
   if (!tile) return void fail("no free tile next to base");
   p.energy -= spec.costEnergy;
   p.crystal -= spec.costCrystal;
@@ -312,7 +320,7 @@ function applySpawn(state: GameState, player: PlayerId, intents: Intents, events
 function resolveMovement(prev: GameState, state: GameState, intents: [Intents, Intents], events: GameEvent[]): void {
   const size = state.map.size;
   const staticOcc = occupancy(state, false);
-  const maxSpeed = Math.max(...UNIT_TYPES.map((t) => CONFIG.units[t].speed));
+  const maxSpeed = state.units.reduce((max, u) => Math.max(max, unitSpeed(state, u.owner, u.type)), 0);
 
   // moveTo distance fields, cached per (player, target) for this tick. Paths use
   // terrain, bases and the structures the player could see at the start of the tick.
@@ -336,7 +344,7 @@ function resolveMovement(prev: GameState, state: GameState, intents: [Intents, I
     const byId = new Map<number, Unit>();
     for (const u of state.units) {
       byId.set(u.id, u);
-      if (CONFIG.units[u.type].speed < sub) continue;
+      if (unitSpeed(state, u.owner, u.type) < sub) continue;
       const act = intents[u.owner - 1]!.unit.get(u.id);
       if (!act || (act.type !== "move" && act.type !== "moveTo")) continue;
       let dir: Dir | null;
@@ -397,7 +405,9 @@ function pathBlocking(state: GameState, player: PlayerId): Uint8Array {
   const vis = computeVisibility(state, player);
   const b = new Uint8Array(size * size);
   for (let i = 0; i < b.length; i++) if (state.map.tiles[i] !== TILE.floor) b[i] = 1;
-  for (const base of state.bases) b[base.y * size + base.x] = 1;
+  for (const base of state.bases) {
+    if (base.hp > 0 && (base.owner === player || vis[base.y * size + base.x])) b[base.y * size + base.x] = 1;
+  }
   for (const s of state.structures) {
     const i = s.y * size + s.x;
     if (s.owner === player || vis[i]) b[i] = 1;
@@ -474,8 +484,7 @@ function resolveDeposit(state: GameState, intents: [Intents, Intents], events: G
   for (const u of state.units) {
     const act = intents[u.owner - 1]!.unit.get(u.id);
     if (act?.type !== "deposit") continue;
-    const base = state.bases[u.owner - 1]!;
-    if (chebyshev(u, base) !== 1) {
+    if (!state.bases.some((b) => b.owner === u.owner && b.hp > 0 && chebyshev(u, b) === 1)) {
       events.push({ type: "invalid_action", player: u.owner, action: act, reason: "not adjacent to base" });
       continue;
     }
@@ -510,8 +519,8 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
       fail("build tile not empty");
       continue;
     }
-    const sc = CONFIG.structures[act.structure];
-    if (chebyshev(act, state.bases[u.owner - 1]!) > sc.maxDistFromBase) {
+    const sc = act.structure === "base" ? CONFIG.base : CONFIG.structures[act.structure];
+    if (Number.isFinite(sc.maxDistFromBase) && !state.bases.some((b) => b.owner === u.owner && b.hp > 0 && chebyshev(act, b) <= sc.maxDistFromBase)) {
       fail(`${act.structure} must be within ${sc.maxDistFromBase} tiles of base`);
       continue;
     }
@@ -532,14 +541,19 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
         events.push({ type: "invalid_action", player: p, action: r.act, reason: "both players built on the same tile" });
         continue;
       }
-      const cost = CONFIG.structures[r.act.structure].costEnergy;
+      const spec = r.act.structure === "base" ? CONFIG.base : CONFIG.structures[r.act.structure];
+      const cost = spec.costEnergy;
       if (pl.energy < cost) {
         events.push({ type: "invalid_action", player: p, action: r.act, reason: "not enough energy" });
         continue;
       }
       pl.energy -= cost;
       const id = state.nextId++;
-      state.structures.push({ id, owner: p, type: r.act.structure, x: r.act.x, y: r.act.y, hp: CONFIG.structures[r.act.structure].hp });
+      if (r.act.structure === "base") {
+        state.bases.push({ id, owner: p, x: r.act.x, y: r.act.y, hp: spec.hp });
+      } else {
+        state.structures.push({ id, owner: p, type: r.act.structure, x: r.act.x, y: r.act.y, hp: spec.hp });
+      }
       events.push({ type: "build", player: p, unitId: r.unit.id, structureId: id, structure: r.act.structure, x: r.act.x, y: r.act.y });
     }
   }
@@ -552,7 +566,7 @@ function resolveCombat(state: GameState, intents: [Intents, Intents], events: Ga
   const targets = new Map<number, Target>();
   for (const u of state.units) targets.set(u.id, { id: u.id, owner: u.owner, x: u.x, y: u.y, hp: u.hp, isUnit: true });
   for (const s of state.structures) targets.set(s.id, { id: s.id, owner: s.owner, x: s.x, y: s.y, hp: s.hp, isUnit: false });
-  for (const b of state.bases) targets.set(b.id, { id: b.id, owner: b.owner, x: b.x, y: b.y, hp: b.hp, isUnit: false });
+  for (const b of state.bases) if (b.hp > 0) targets.set(b.id, { id: b.id, owner: b.owner, x: b.x, y: b.y, hp: b.hp, isUnit: false });
 
   const damage = new Map<number, number>();
   const hit = (attackerId: number, t: Target, raw: number) => {

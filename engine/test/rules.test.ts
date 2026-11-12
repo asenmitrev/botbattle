@@ -111,6 +111,58 @@ describe("movement", () => {
     expect(unit(s2, sc.id)).toMatchObject({ x: 12, y: 10 }); // wall right after
   });
 
+  it.each(["move", "moveTo"] as const)("Scout Speed doubles only the owner's scouts for %s on the purchase tick", (type) => {
+    const s = testState();
+    const scout = addUnit(s, 1, "scout", 10, 10);
+    const worker = addUnit(s, 1, "worker", 10, 12);
+    const fighter = addUnit(s, 1, "fighter", 10, 14);
+    const enemy = addUnit(s, 2, "scout", 10, 20);
+    const move = (id: number, y: number) => type === "move"
+      ? { type, unitId: id, dir: "E" as const }
+      : { type, unitId: id, x: 18, y };
+    const { state, events } = step(s, [
+      { type: "upgrade", upgrade: "scoutSpeed" },
+      move(scout.id, 10), move(worker.id, 12), move(fighter.id, 14),
+    ], [move(enemy.id, 20)]);
+    expect(unit(state, scout.id)).toMatchObject({ x: 14, y: 10 });
+    expect(unit(state, worker.id)!.x).toBe(11);
+    expect(unit(state, fighter.id)!.x).toBe(11);
+    expect(unit(state, enemy.id)!.x).toBe(12);
+    expect(invalid(events)).toHaveLength(0);
+    expect(buildBotView(state, 1).upgrades.scoutSpeed).toBe(true);
+    expect(buildBotView(state, 2).upgrades.scoutSpeed).toBe(false);
+  });
+
+  it("upgraded scouts still stop at obstacles and map edges", () => {
+    const s = testState({ walls: [[13, 10]] });
+    s.players[0].upgrades.scoutSpeed = true;
+    const scout = addUnit(s, 1, "scout", 10, 10);
+    const edge = addUnit(s, 1, "scout", 38, 20);
+    const { state } = step(s, [
+      { type: "move", unitId: scout.id, dir: "E" },
+      { type: "move", unitId: edge.id, dir: "E" },
+    ], []);
+    expect(unit(state, scout.id)).toMatchObject({ x: 12, y: 10 });
+    expect(unit(state, edge.id)).toMatchObject({ x: 39, y: 20 });
+  });
+
+  it("upgraded scouts stop at occupied tiles on later sub-steps", () => {
+    const s = testState();
+    s.players[0].upgrades.scoutSpeed = true;
+    const scout = addUnit(s, 1, "scout", 10, 10);
+    addUnit(s, 2, "worker", 13, 10);
+    const { state } = step(s, [{ type: "move", unitId: scout.id, dir: "E" }], []);
+    expect(unit(state, scout.id)).toMatchObject({ x: 12, y: 10 });
+  });
+
+  it("upgraded moveTo stops at its target without overshooting", () => {
+    const s = testState();
+    s.players[0].upgrades.scoutSpeed = true;
+    const scout = addUnit(s, 1, "scout", 10, 10);
+    const { state } = step(s, [{ type: "moveTo", unitId: scout.id, x: 12, y: 10 }], []);
+    expect(unit(state, scout.id)).toMatchObject({ x: 12, y: 10 });
+  });
+
   it("moveTo takes one shortest-path step around obstacles", () => {
     // Wall column at x=11, y=8..12; unit at (10,10) going to (12,10).
     const s = testState({ walls: [8, 9, 10, 11, 12].map((y) => [11, y] as [number, number]) });
@@ -203,6 +255,30 @@ describe("spawning and upgrades", () => {
     const r2 = step(r1.state, [{ type: "upgrade", upgrade: "armor" }], []);
     expect(invalid(r2.events)[0]).toMatchObject({ reason: "already purchased" });
   });
+
+  it.each([14, 15])("Scout Speed requires 15 crystals with %i available", (crystal) => {
+    const s = testState();
+    s.players[0].crystal = crystal;
+    const { state, events } = step(s, [{ type: "upgrade", upgrade: "scoutSpeed" }], []);
+    expect(state.players[0].upgrades.scoutSpeed).toBe(crystal === 15);
+    expect(state.players[0].crystal).toBe(crystal === 15 ? 0 : crystal);
+    expect(state.players[0].energy).toBe(1000);
+    expect(invalid(events)).toHaveLength(crystal === 15 ? 0 : 1);
+  });
+
+  it("Scout Speed cannot be repurchased and applies to future scouts", () => {
+    const s = testState();
+    const purchased = step(s, [{ type: "upgrade", upgrade: "scoutSpeed" }], []).state;
+    const { state: spawned, events } = step(purchased, [
+      { type: "upgrade", upgrade: "scoutSpeed" },
+      { type: "spawn", unit: "scout" },
+    ], []);
+    expect(spawned.players[0].crystal).toBe(985);
+    expect(invalid(events)[0]).toMatchObject({ reason: "already purchased" });
+    const scout = spawned.units[0]!;
+    const { state } = step(spawned, [{ type: "move", unitId: scout.id, dir: "E" }], []);
+    expect(unit(state, scout.id)!.x).toBe(scout.x + 4);
+  });
 });
 
 describe("harvest, deposit, build", () => {
@@ -262,9 +338,21 @@ describe("harvest, deposit, build", () => {
       { type: "build", unitId: w.id, structure: "turret", x: 9, y: 9 },
       { type: "build", unitId: w2.id, structure: "wall", x: 21, y: 20 },
     ], []);
-    expect(state.structures.map((x) => [x.type, x.x, x.y, x.hp])).toEqual([["turret", 9, 9, 50], ["wall", 21, 20, 40]]);
-    expect(state.players[0].energy).toBe(1000 - 100 - 10);
+    expect(state.structures.map((x) => [x.type, x.x, x.y, x.hp])).toEqual([["turret", 9, 9, 50], ["wall", 21, 20, 60]]);
+    expect(state.players[0].energy).toBe(1000 - 100 - 5);
     expect(invalid(events)).toHaveLength(0);
+  });
+
+  it.each([4, 5])("checks wall affordability with %i energy", (energy) => {
+    const s = testState();
+    s.players[0].energy = energy;
+    const w = addUnit(s, 1, "worker", 10, 10);
+    const { state, events } = step(s, [
+      { type: "build", unitId: w.id, structure: "wall", x: 11, y: 10 },
+    ], []);
+    expect(state.structures).toHaveLength(energy === 5 ? 1 : 0);
+    expect(state.players[0].energy).toBe(energy === 5 ? 0 : energy);
+    expect(invalid(events)).toHaveLength(energy === 5 ? 0 : 1);
   });
 
   it("turrets must be within 8 tiles of own base", () => {
@@ -535,7 +623,7 @@ describe("validation and robustness", () => {
           targetId: Math.floor(rnd() * 200),
           structure: rnd() < 0.5 ? "turret" : "wall",
           unit: ["worker", "fighter", "scout"][Math.floor(rnd() * 3)],
-          upgrade: ["cargo", "armor", "weapons"][Math.floor(rnd() * 3)],
+          upgrade: ["cargo", "armor", "weapons", "scoutSpeed"][Math.floor(rnd() * 4)],
           text: "t",
         }));
       s = step(s, mk(), mk()).state;

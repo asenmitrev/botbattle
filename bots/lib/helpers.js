@@ -7,10 +7,12 @@ export const COSTS = {
   fighter: { energy: 60, crystal: 15 },
   scout: { energy: 30, crystal: 0 },
   turret: { energy: 100, crystal: 0 },
-  wall: { energy: 20, crystal: 0 },
+  wall: { energy: 5, crystal: 0 },
+  base: { energy: 100, crystal: 0 },
   cargo: { energy: 0, crystal: 30 },
   armor: { energy: 0, crystal: 40 },
   weapons: { energy: 0, crystal: 40 },
+  scoutSpeed: { energy: 0, crystal: 15 },
 };
 
 /** Chebyshev distance — the metric used for all action ranges (adjacent = 1). */
@@ -45,9 +47,10 @@ export function nearest(from, list, filter) {
   return best;
 }
 
-/** The enemy base is the point mirror of yours (maps are point-symmetric). */
+/** The enemy starting base is the point mirror of your starting base. */
 export function enemyBasePos(state) {
-  return { x: state.mapSize - 1 - state.myBase.x, y: state.mapSize - 1 - state.myBase.y };
+  const base = state.startingBase || state.myBase;
+  return { x: state.mapSize - 1 - base.x, y: state.mapSize - 1 - base.y };
 }
 
 export function canAfford(state, what, count = 1) {
@@ -83,7 +86,7 @@ export function pathTo(state, from, to, options = {}) {
   } else {
     for (const t of state.visibleTiles) if (t.type !== "floor") blocked[t.y * size + t.x] = 1;
   }
-  blocked[state.myBase.y * size + state.myBase.x] = 1;
+  for (const b of state.myBases || [state.myBase]) if (b.hp > 0) blocked[b.y * size + b.x] = 1;
   for (const s of state.myStructures) blocked[s.y * size + s.x] = 1;
   for (const e of state.visibleEnemies) if (e.kind !== "unit") blocked[e.y * size + e.x] = 1;
   for (const p of options.avoid || []) blocked[p.y * size + p.x] = 1;
@@ -139,7 +142,7 @@ export function freeNeighbors(state, p) {
   for (const u of state.myUnits) taken.add(key(u.x, u.y));
   for (const s of state.myStructures) taken.add(key(s.x, s.y));
   for (const e of state.visibleEnemies) taken.add(key(e.x, e.y));
-  taken.add(key(state.myBase.x, state.myBase.y));
+  for (const b of state.myBases || [state.myBase]) if (b.hp > 0) taken.add(key(b.x, b.y));
   const out = [];
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {

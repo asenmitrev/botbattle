@@ -1,4 +1,4 @@
-# Bot Arena — Rules (v1, config 1.5.0)
+# Bot Arena — Rules (v1, config 1.8.0)
 
 This file is the human-readable source of truth. Every number here comes from
 `engine/src/config.ts`; if they ever disagree, that is a bug — fix both.
@@ -7,7 +7,7 @@ This file is the human-readable source of truth. Every number here comes from
 
 Two bots play a 1v1 match. Each tick both bots receive a fog-filtered view of the
 game and return a list of actions. The engine then resolves both players' actions
-**simultaneously** — there is no turn-order advantage. Destroy the enemy base to
+**simultaneously** — there is no turn-order advantage. Destroy all enemy bases to
 win, or have more living units when time runs out.
 
 The simulation is deterministic: the same seed and the same bot actions always
@@ -26,7 +26,7 @@ Movement is 4-directional (N/S/E/W). North is −y.
 
 - 40×40 grid generated from a seed. Tile types: `floor`, `wall`, `energy_node`, `crystal_node`.
 - **Point-symmetric**: tile (x, y) always equals tile (39−x, 39−y).
-- Player 1's base is at (4, 4), player 2's at (35, 35). All tiles within Chebyshev 2 of a base are floor.
+- Player 1's starting base is at (4, 4), player 2's at (35, 35). All tiles within Chebyshev 2 of a starting base are floor. Building additional bases does not change terrain.
 - 4 energy nodes per side, at Euclidean distance 3–8 from that side's base.
 - Crystal nodes come in mirrored pairs within Euclidean 7 of the center: **2 or 4** in total.
   (3 is impossible on an even-sized point-symmetric map, since no tile is its own mirror.)
@@ -39,12 +39,12 @@ Movement is 4-directional (N/S/E/W). North is −y.
 
 - Ticks are numbered 0–499 (500 ticks max).
 - Each player starts with a base (200 HP), 150 energy, 0 crystal, and 2 workers next to the base.
-- **Unit cap**: 40 units per player (structures don't count).
-- **Win**: destroy the enemy base (the match ends that tick). If both bases fall on the same
-  tick, or tick 499 resolves with both alive, the player with **more living units wins**
-  (all unit types count equally; structures don't count). Equal unit counts fall back to the
+- **Unit cap**: 40 units per player (structures and bases don't count).
+- **Win**: destroy all enemy bases (the match ends that tick). Losing one base is not defeat while another friendly base survives. If both players lose their last bases on the same
+  tick, or tick 499 resolves with both players still having a base, the player with **more living units wins**
+  (all unit types count equally; structures and bases don't count). Equal unit counts fall back to the
   **higher score**; equal score is a **draw**.
-- **Score** (tiebreaker, and the ladder's high score) = banked energy + 3 × banked crystal + value of living units + 2 × base HP.
+- **Score** (tiebreaker, and the ladder's high score) = banked energy + 3 × banked crystal + value of living units + 2 × total surviving friendly base HP.
   A unit's value is its spawn cost with crystal counted at 3×, so worker 50, fighter 105, scout 30.
   Cargo that hasn't been deposited does not count. Structures don't count.
 - **Forfeit**: a bot that fails 10 ticks in a row loses. If both are failing, play continues with both idle.
@@ -78,7 +78,7 @@ the next tick. A bot whose initialization fails fails every tick.
 
 - A worker adjacent to a node can `harvest` it: it takes `min(5, free cargo, node amount)` into its cargo.
 - Energy and crystal share one cargo capacity (20, or 30 with the Cargo upgrade).
-- Resources only count once a worker adjacent to its own base does `deposit` (all cargo is deposited).
+- Resources only count once a worker adjacent to any living friendly base does `deposit` (all cargo is deposited into the player's shared energy and crystal balance).
 - **Contested nodes**: if several workers harvest the same node in a tick, player 1's workers
   go first on even ticks and player 2's on odd ticks; within a player, lowest unit ID first.
 
@@ -88,9 +88,10 @@ the next tick. A bot whose initialization fails fails every tick.
 |---|---|---|---|---|---|
 | Worker | 50 E | 10 | 1 | 5 | carry 20, harvest 5/tick, build |
 | Fighter | 60 E + 15 C | 30 | 1 | 5 | attack 6 dmg, range 1 |
-| Scout | 30 E | 5 | 2 | 9 | attack 1 dmg, range 1 |
+| Scout | 30 E | 5 | 2 (4 with Scout Speed) | 9 | attack 1 dmg, range 1 |
 
-- **Base**: 200 HP, vision 7. Spawns at most 1 unit per tick. Bases cannot move and are never hurt by the zone.
+- **Base**: 200 HP, vision 7. Additional bases cost 100 energy and are built by workers with `structure: "base"`. Bases cannot move and are never hurt by the zone.
+- **Spawning**: at most 1 unit per player per tick, regardless of base count. An optional `baseId` selects a living friendly base. Without it, living friendly bases are tried in ascending ID order until a free spawn tile is found. Newly built bases can spawn starting next tick.
 - **Spawn tile**: the first free tile adjacent to the base, checked in the order
   (+1,+1) (+1,0) (0,+1) (+1,−1) (−1,+1) (0,−1) (−1,0) (−1,−1). Player 2 uses the negated
   offsets, which keeps spawn placement mirror-symmetric. If no tile is free the spawn fails.
@@ -101,23 +102,27 @@ A worker builds on an empty floor tile adjacent to it. Building is instant and p
 
 | Structure | Cost | HP | Notes |
 |---|---|---|---|
-| Turret | 100 E | 50 | 4 dmg, range 4, vision 4. Must be within Chebyshev 8 of own base. Auto-targets the lowest-HP enemy **unit** in range (ties → lowest ID). |
-| Wall | 10 E | 40 | Blocks movement. No vision. |
+| Turret | 100 E | 50 | 4 dmg, range 4, vision 4. Must be within Chebyshev 8 of any living friendly base. Auto-targets the lowest-HP enemy **unit** in range (ties → lowest ID). |
+| Wall | 5 E | 60 | Blocks movement. No vision. |
+| Base | 100 E | 200 | Vision 7, resource deposits, spawning, and turret placement within Chebyshev 8. No distance limit for construction. Immune to zone damage. |
 
 - The tile must be empty *after movement* this tick: no unit, structure, base or node.
 - If both players build on the same tile in the same tick, both builds fail.
   If two of your own workers pick the same tile, the lower unit ID builds.
 - Builds are paid in unit-ID order, so if energy runs out the later builds fail.
+- Turrets may be built within Chebyshev 8 of **any living friendly base**, not just the starting base. The base must exist before this tick's build phase. Existing turrets keep working if a nearby base is destroyed.
+- Destroyed bases no longer block movement or construction, provide vision, accept deposits, or spawn units. They remain in replay state with 0 HP; bots' `myBases` includes only living bases.
 
 ## 8. Upgrades
 
-Upgrades are bought at the base with crystal. Each can be bought once, applies to all your units, and takes effect immediately.
+Upgrades are bought at the base with crystal. Each can be bought once, applies to all your current and future eligible units, and takes effect immediately.
 
 | Upgrade | Cost | Effect |
 |---|---|---|
 | Cargo | 30 C | Worker capacity 20 → 30 |
 | Armor | 40 C | Units take −2 damage from attacks (minimum 1). Not structures, the base, or zone damage. |
 | Weapons | 40 C | Fighters deal +3 damage (6 → 9). Turrets are unaffected. |
+| Scout Speed (`scoutSpeed`) | 15 C | Doubles scout speed from 2 to 4 tiles per tick for both `move` and `moveTo`, including the purchase tick. Other units are unaffected. |
 
 ## 9. Combat
 
@@ -132,13 +137,13 @@ Upgrades are bought at the base with crystal. Each can be bought once, applies t
 - Its radius is 28 until tick 399, which covers the whole map. At tick 400 it becomes 27,
   then shrinks by 1 every 4 ticks: `radius(t) = 28 − (1 + ⌊(t − 400)/4⌋)` for t ≥ 400, so 3 by tick 499.
 - Units and structures outside the zone (`dx² + dy² > r²`) take 3 damage per tick. Armor does not reduce it. Bases are immune.
-- Note: each base is ≈21.9 from the center, so from about tick 424 the area around both bases is outside the zone.
+- Note: each starting base is ≈21.9 from the center, so from about tick 424 the area around both starting bases is outside the zone.
 
 ## 11. Fog of war
 
-- Each player sees every tile within a vision circle of its base (7), units (worker 5,
+- Each player sees every tile within a vision circle of each living friendly base (7), units (worker 5,
   fighter 5, scout 9) and turrets (4). There is no line of sight in v1.
-- Bots see enemy units, enemy structures, the enemy base and nodes (with amounts) only on visible tiles.
+- Bots see enemy units, enemy structures, living enemy bases and nodes (with amounts) only on visible tiles.
 - `moveTo` pathfinding avoids terrain, bases, your structures and the enemy structures you can currently see.
 
 ## 12. Tick resolution order
@@ -164,10 +169,10 @@ The engine runs `step(state, actionsP1, actionsP2) → { state, events }`:
 4. **Harvest, then deposit, then build** (see §5, §7). Deposits happen before builds, so energy
    deposited this tick can pay for a build this tick.
 5. **Combat**: fighter attacks, then turret target selection. All damage comes from pre-combat state and is applied at once.
-6. **Remove dead** units and structures (HP ≤ 0). If a base is at 0 HP the match ends now (see §4), and phase 7 is skipped.
+6. **Remove dead** units and structures (HP ≤ 0), and deactivate destroyed bases. If a player has no living bases the match ends now (see §4), and phase 7 is skipped. A base built this tick can prevent defeat even if the starting base is destroyed.
 7. **Node regeneration**, then **zone damage**, then remove anything the zone killed.
 8. **Vision** is recomputed for each player (it is derived from state, for the next tick's bot views).
-   The tick counter advances; after tick 499 the match ends on score.
+   The tick counter advances; after tick 499 the match ends on living unit counts, then score.
 
 ## 13. Replays
 

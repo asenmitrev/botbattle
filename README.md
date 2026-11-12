@@ -11,9 +11,22 @@ Programmable 1v1 strategy game: write a bot (`onTick(state, memory) → actions`
 |---|---|---|---|---|---|
 | Worker | 50 E | 10 | 1 | 5 | carries 20, harvests 5/tick, builds; can't attack |
 | Fighter | 60 E + 15 C | 30 | 1 | 5 | attacks for 6 (9 with Weapons), range 1 |
-| Scout | 30 E | 5 | 2 | 9 | attacks for 1, range 1; can't carry |
-| Turret | 100 E | 50 | – | 4 | auto-shoots the lowest-HP enemy unit within 4 for 4; must be built within Chebyshev 8 of your base |
-| Wall | 10 E | 40 | – | – | blocks movement |
+| Scout | 30 E | 5 | 2 (4 with Scout Speed) | 9 | attacks for 1, range 1; can't carry |
+| Turret | 100 E | 50 | – | 4 | auto-shoots the lowest-HP enemy unit within 4 for 4; must be built within Chebyshev 8 of any living friendly base |
+| Wall | 5 E | 60 | – | – | blocks movement |
+| Base | 100 E | 200 | – | 7 | workers deposit resources here; supports spawning and nearby turrets; immune to zone damage |
+
+**Scout Speed** is a one-time upgrade costing 15 crystals. It doubles movement speed
+for all your current and future scouts from 2 to 4 tiles per tick, effective immediately.
+Buy it with `{ type: "upgrade", upgrade: "scoutSpeed" }`.
+
+**Additional bases**: a worker builds on an adjacent empty floor tile with
+`{ type: "build", unitId, structure: "base", x, y }`. Workers can deposit at any living
+friendly base into the shared resource balance, and turrets can be built within 8 tiles
+of any living friendly base. A player loses to base destruction only after losing **all bases**.
+Bots receive `myBases` (all living friendly bases); `myBase` defaults to the oldest survivor.
+Use `{ type: "spawn", unit: "worker", baseId }` to choose a base; the limit remains
+one spawn per player per tick. Scoring counts the total HP of surviving friendly bases.
 
 See RULES.md for everything else.
 

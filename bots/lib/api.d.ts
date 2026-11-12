@@ -6,7 +6,8 @@ export type PlayerId = 1 | 2;
 export type Dir = "N" | "S" | "E" | "W";
 export type UnitType = "worker" | "fighter" | "scout";
 export type StructureType = "turret" | "wall";
-export type UpgradeType = "cargo" | "armor" | "weapons";
+export type BuildType = StructureType | "base";
+export type UpgradeType = "cargo" | "armor" | "weapons" | "scoutSpeed";
 export type NodeType = "energy" | "crystal";
 export type TileType = "floor" | "wall" | "energy_node" | "crystal_node";
 
@@ -50,11 +51,13 @@ export interface BotState {
   tick: number;
   player: PlayerId;
   myBase: { id: number; x: number; y: number; hp: number };
+  myBases: { id: number; x: number; y: number; hp: number }[];
+  startingBase: { x: number; y: number };
   myUnits: MyUnit[];
   myStructures: MyStructure[];
   energy: number;
   crystal: number;
-  upgrades: { cargo: boolean; armor: boolean; weapons: boolean };
+  upgrades: { cargo: boolean; armor: boolean; weapons: boolean; scoutSpeed: boolean };
   visibleEnemies: Enemy[];
   visibleNodes: VisibleNode[];
   visibleTiles: VisibleTile[];
@@ -70,8 +73,8 @@ export type Action =
   | { type: "harvest"; unitId: number; nodeId: number }
   | { type: "deposit"; unitId: number }
   | { type: "attack"; unitId: number; targetId: number }
-  | { type: "build"; unitId: number; structure: StructureType; x: number; y: number }
-  | { type: "spawn"; unit: UnitType }
+  | { type: "build"; unitId: number; structure: BuildType; x: number; y: number }
+  | { type: "spawn"; unit: UnitType; baseId?: number }
   | { type: "upgrade"; upgrade: UpgradeType }
   | { type: "log"; text: string }
   | { type: "mark"; x: number; y: number; color?: string; label?: string };

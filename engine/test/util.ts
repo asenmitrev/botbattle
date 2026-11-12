@@ -16,8 +16,8 @@ export function testState(opts: { walls?: [number, number][]; tick?: number } = 
       { id: 2, owner: 2, x: 35, y: 35, hp: CONFIG.base.hp },
     ],
     players: [
-      { id: 1, energy: 1000, crystal: 1000, upgrades: { cargo: false, armor: false, weapons: false } },
-      { id: 2, energy: 1000, crystal: 1000, upgrades: { cargo: false, armor: false, weapons: false } },
+      { id: 1, energy: 1000, crystal: 1000, upgrades: { cargo: false, armor: false, weapons: false, scoutSpeed: false } },
+      { id: 2, energy: 1000, crystal: 1000, upgrades: { cargo: false, armor: false, weapons: false, scoutSpeed: false } },
     ],
     units: [],
     structures: [],

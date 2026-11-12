@@ -16,7 +16,7 @@ export function computeVisibility(state: GameState, player: PlayerId): Uint8Arra
       }
     }
   };
-  reveal(state.bases[player - 1]!, CONFIG.base.vision);
+  for (const b of state.bases) if (b.owner === player && b.hp > 0) reveal(b, CONFIG.base.vision);
   for (const u of state.units) if (u.owner === player) reveal(u, CONFIG.units[u.type].vision);
   for (const s of state.structures) if (s.owner === player) reveal(s, CONFIG.structures[s.type].vision);
   return vis;
@@ -66,6 +66,8 @@ export interface BotState {
   tick: number;
   player: PlayerId;
   myBase: { id: number; x: number; y: number; hp: number };
+  myBases: { id: number; x: number; y: number; hp: number }[];
+  startingBase: { x: number; y: number };
   myUnits: BotUnit[];
   myStructures: BotStructure[];
   energy: number;
@@ -92,11 +94,15 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
   const size = state.map.size;
   const seen = (p: Pos) => vis[p.y * size + p.x] === 1;
   const me = state.players[player - 1]!;
-  const base = state.bases[player - 1]!;
-  const enemyBase = state.bases[2 - player]!;
+  const startingBase = state.bases.find((b) => b.owner === player)!;
+  const myBases = state.bases.filter((b) => b.owner === player && b.hp > 0)
+    .sort((a, b) => a.id - b.id).map((b) => ({ id: b.id, x: b.x, y: b.y, hp: b.hp }));
+  const base = myBases[0] ?? startingBase;
 
   const visibleEnemies: BotEnemy[] = [];
-  if (seen(enemyBase)) visibleEnemies.push({ id: enemyBase.id, kind: "base", type: "base", x: enemyBase.x, y: enemyBase.y, hp: enemyBase.hp });
+  for (const b of state.bases) {
+    if (b.owner !== player && b.hp > 0 && seen(b)) visibleEnemies.push({ id: b.id, kind: "base", type: "base", x: b.x, y: b.y, hp: b.hp });
+  }
   for (const u of state.units) {
     if (u.owner !== player && seen(u)) visibleEnemies.push({ id: u.id, kind: "unit", type: u.type, x: u.x, y: u.y, hp: u.hp });
   }
@@ -117,6 +123,8 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
     tick: state.tick,
     player,
     myBase: { id: base.id, x: base.x, y: base.y, hp: base.hp },
+    myBases,
+    startingBase: { x: startingBase.x, y: startingBase.y },
     myUnits: state.units
       .filter((u) => u.owner === player)
       .map((u) => ({
