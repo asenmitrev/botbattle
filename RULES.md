@@ -1,0 +1,177 @@
+# Bot Arena — Rules (v1, config 1.5.0)
+
+This file is the human-readable source of truth. Every number here comes from
+`engine/src/config.ts`; if they ever disagree, that is a bug — fix both.
+
+## 1. Overview
+
+Two bots play a 1v1 match. Each tick both bots receive a fog-filtered view of the
+game and return a list of actions. The engine then resolves both players' actions
+**simultaneously** — there is no turn-order advantage. Destroy the enemy base to
+win, or have more living units when time runs out.
+
+The simulation is deterministic: the same seed and the same bot actions always
+produce the identical match.
+
+## 2. Distances
+
+| Metric | Formula | Used for |
+|---|---|---|
+| **Chebyshev** | `max(|dx|, |dy|)` | every *action range*: "adjacent" (= 1, diagonals included), attack range, turret range, build distance, turret-to-base limit |
+| **Euclidean** | `dx² + dy² ≤ r²` | vision circles and the shrinking zone |
+
+Movement is 4-directional (N/S/E/W). North is −y.
+
+## 3. Map
+
+- 40×40 grid generated from a seed. Tile types: `floor`, `wall`, `energy_node`, `crystal_node`.
+- **Point-symmetric**: tile (x, y) always equals tile (39−x, 39−y).
+- Player 1's base is at (4, 4), player 2's at (35, 35). All tiles within Chebyshev 2 of a base are floor.
+- 4 energy nodes per side, at Euclidean distance 3–8 from that side's base.
+- Crystal nodes come in mirrored pairs within Euclidean 7 of the center: **2 or 4** in total.
+  (3 is impossible on an even-sized point-symmetric map, since no tile is its own mirror.)
+- Generation is retried until a BFS confirms a walkable path from base 1 to base 2 and that
+  every node has a reachable adjacent tile.
+- Blocking: terrain walls, node tiles, bases, structures and units all block movement.
+  Units never share a tile.
+
+## 4. Match
+
+- Ticks are numbered 0–499 (500 ticks max).
+- Each player starts with a base (200 HP), 150 energy, 0 crystal, and 2 workers next to the base.
+- **Unit cap**: 40 units per player (structures don't count).
+- **Win**: destroy the enemy base (the match ends that tick). If both bases fall on the same
+  tick, or tick 499 resolves with both alive, the player with **more living units wins**
+  (all unit types count equally; structures don't count). Equal unit counts fall back to the
+  **higher score**; equal score is a **draw**.
+- **Score** (tiebreaker, and the ladder's high score) = banked energy + 3 × banked crystal + value of living units + 2 × base HP.
+  A unit's value is its spawn cost with crystal counted at 3×, so worker 50, fighter 105, scout 30.
+  Cargo that hasn't been deposited does not count. Structures don't count.
+- **Forfeit**: a bot that fails 10 ticks in a row loses. If both are failing, play continues with both idle.
+
+## 4a. Bot sandbox
+
+Official matches run each bot in its own `isolated-vm` isolate. A bot has no `require`, fs, network, timers,
+`process`, `WebAssembly`, `Atomics` or `SharedArrayBuffer`. Its only import is the `"arena"` helper library,
+which is also the global `Arena`. `Math.random` is seeded from the match seed and player.
+
+| Limit | Value (config `bot.*`) |
+|---|---|
+| Heap | 64 MB (`isolateMemoryMb`) |
+| CPU per tick | 50 ms on average, measured on the isolate's CPU clock (`tickCpuMs`). Unused CPU is banked up to 250 ms (`cpuBankMs`, starts full), and a tick fails only if it uses more than 50 ms plus the bank. |
+| Wall-clock cutoff per tick | 500 ms (`tickWallMs`), which kills infinite loops (above the 300 ms CPU maximum, so a busy host doesn't cost a bot its turn) |
+| Init (top-level code) | 1000 ms, once (`initMs`) |
+| Persisted memory | 100 KB of JSON (`memoryLimitBytes`) |
+| Returned output | 1 MB (`outputLimitBytes`) |
+
+A **failed tick** is any exception, timeout, CPU overrun, oversized memory or output, or non-serializable
+result. On a failed tick the bot's actions are discarded (it does nothing), its memory reverts to the last
+good tick, and a `bot_error` is recorded in the replay. If the isolate runs out of memory it is rebuilt before
+the next tick. A bot whose initialization fails fails every tick.
+
+## 5. Resources
+
+| Node | Amount | Regen |
+|---|---|---|
+| Energy | 600 | +1 per tick, up to 600 |
+| Crystal | 200 | none |
+
+- A worker adjacent to a node can `harvest` it: it takes `min(5, free cargo, node amount)` into its cargo.
+- Energy and crystal share one cargo capacity (20, or 30 with the Cargo upgrade).
+- Resources only count once a worker adjacent to its own base does `deposit` (all cargo is deposited).
+- **Contested nodes**: if several workers harvest the same node in a tick, player 1's workers
+  go first on even ticks and player 2's on odd ticks; within a player, lowest unit ID first.
+
+## 6. Units
+
+| Unit | Cost | HP | Speed | Vision | Abilities |
+|---|---|---|---|---|---|
+| Worker | 50 E | 10 | 1 | 5 | carry 20, harvest 5/tick, build |
+| Fighter | 60 E + 15 C | 30 | 1 | 5 | attack 6 dmg, range 1 |
+| Scout | 30 E | 5 | 2 | 9 | attack 1 dmg, range 1 |
+
+- **Base**: 200 HP, vision 7. Spawns at most 1 unit per tick. Bases cannot move and are never hurt by the zone.
+- **Spawn tile**: the first free tile adjacent to the base, checked in the order
+  (+1,+1) (+1,0) (0,+1) (+1,−1) (−1,+1) (0,−1) (−1,0) (−1,−1). Player 2 uses the negated
+  offsets, which keeps spawn placement mirror-symmetric. If no tile is free the spawn fails.
+
+## 7. Structures
+
+A worker builds on an empty floor tile adjacent to it. Building is instant and paid in energy.
+
+| Structure | Cost | HP | Notes |
+|---|---|---|---|
+| Turret | 100 E | 50 | 4 dmg, range 4, vision 4. Must be within Chebyshev 8 of own base. Auto-targets the lowest-HP enemy **unit** in range (ties → lowest ID). |
+| Wall | 10 E | 40 | Blocks movement. No vision. |
+
+- The tile must be empty *after movement* this tick: no unit, structure, base or node.
+- If both players build on the same tile in the same tick, both builds fail.
+  If two of your own workers pick the same tile, the lower unit ID builds.
+- Builds are paid in unit-ID order, so if energy runs out the later builds fail.
+
+## 8. Upgrades
+
+Upgrades are bought at the base with crystal. Each can be bought once, applies to all your units, and takes effect immediately.
+
+| Upgrade | Cost | Effect |
+|---|---|---|
+| Cargo | 30 C | Worker capacity 20 → 30 |
+| Armor | 40 C | Units take −2 damage from attacks (minimum 1). Not structures, the base, or zone damage. |
+| Weapons | 40 C | Fighters deal +3 damage (6 → 9). Turrets are unaffected. |
+
+## 9. Combat
+
+- Fighters (6 dmg) and scouts (1 dmg) `attack` one enemy unit, structure, or base within range 1. They cannot attack their own side.
+- Turrets fire automatically.
+- All damage is computed from the **pre-combat** state and applied **simultaneously**,
+  so two units can kill each other in the same tick.
+
+## 10. Shrinking zone
+
+- The safe zone is a circle centered at (19.5, 19.5).
+- Its radius is 28 until tick 399, which covers the whole map. At tick 400 it becomes 27,
+  then shrinks by 1 every 4 ticks: `radius(t) = 28 − (1 + ⌊(t − 400)/4⌋)` for t ≥ 400, so 3 by tick 499.
+- Units and structures outside the zone (`dx² + dy² > r²`) take 3 damage per tick. Armor does not reduce it. Bases are immune.
+- Note: each base is ≈21.9 from the center, so from about tick 424 the area around both bases is outside the zone.
+
+## 11. Fog of war
+
+- Each player sees every tile within a vision circle of its base (7), units (worker 5,
+  fighter 5, scout 9) and turrets (4). There is no line of sight in v1.
+- Bots see enemy units, enemy structures, the enemy base and nodes (with amounts) only on visible tiles.
+- `moveTo` pathfinding avoids terrain, bases, your structures and the enemy structures you can currently see.
+
+## 12. Tick resolution order
+
+The engine runs `step(state, actionsP1, actionsP2) → { state, events }`:
+
+1. **Collect actions.** Each bot's list is validated. Invalid actions are dropped and logged as
+   `invalid_action` events; they never crash the engine. A unit gets at most one action per
+   tick (the first one; later ones are invalid). Only the first `spawn` counts. `log` and `mark`
+   become events immediately. Limits per tick: 300 actions, 20 logs, 50 marks.
+2. **Upgrades, then spawns.** Player 1 is processed, then player 2. Their resources are independent,
+   so this order cannot matter.
+3. **Movement**, resolved simultaneously in sub-steps. In sub-step *k*, every unit with speed ≥ *k*
+   that has a `move`/`moveTo` attempts one step (`moveTo` recomputes its direction each sub-step).
+   - A step into a terrain wall, node, base, structure or off the map fails.
+   - If 2+ units target the same tile, none of them move.
+   - A unit may step into a tile whose occupant moves away successfully in the same sub-step (chains work).
+   - Cycles of any length, including 2-unit swaps, are blocked: none of their units move.
+   - `moveTo` takes one step along a shortest path (BFS) and ignores units. Ties between equally short
+     steps use the order N, E, S, W for player 1 and S, W, N, E for player 2 (mirrored).
+     If the target tile is blocked, the unit paths to a tile next to it and stops there.
+     An unreachable target gives an `invalid_action` ("no path to target").
+4. **Harvest, then deposit, then build** (see §5, §7). Deposits happen before builds, so energy
+   deposited this tick can pay for a build this tick.
+5. **Combat**: fighter attacks, then turret target selection. All damage comes from pre-combat state and is applied at once.
+6. **Remove dead** units and structures (HP ≤ 0). If a base is at 0 HP the match ends now (see §4), and phase 7 is skipped.
+7. **Node regeneration**, then **zone damage**, then remove anything the zone killed.
+8. **Vision** is recomputed for each player (it is derived from state, for the next tick's bot views).
+   The tick counter advances; after tick 499 the match ends on score.
+
+## 13. Replays
+
+A replay JSON contains the seed, bot names, config version (plus a full copy of the config),
+every tick's actions exactly as passed to `step` and the events produced, full-state snapshots
+every 25 ticks for seeking, and the final state hash. Re-simulating a replay from its seed and
+actions must reproduce the identical final state (`arena verify replay.json`).

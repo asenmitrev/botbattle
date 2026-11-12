@@ -1,0 +1,51 @@
+import fs from "node:fs";
+import path from "node:path";
+import { build } from "esbuild";
+import { defineConfig, type Plugin } from "vite";
+
+/**
+ * `import src from "../bots/greedy.js?bot"` → the bot bundled (with its lib imports)
+ * into one ES module, as a string. The browser sandbox runs it exactly like pasted code.
+ */
+function botBundle(): Plugin {
+  return {
+    name: "arena-bot-bundle",
+    enforce: "pre",
+    resolveId(id, importer) {
+      if (!id.endsWith("?bot") || !importer) return null;
+      return path.resolve(path.dirname(importer), id.slice(0, -4)) + "?bot";
+    },
+    async load(id) {
+      if (!id.endsWith("?bot")) return null;
+      const file = id.slice(0, -4);
+      const out = await build({ entryPoints: [file], bundle: true, format: "esm", write: false, platform: "neutral", metafile: true });
+      for (const input of Object.keys(out.metafile!.inputs)) this.addWatchFile(path.resolve(input));
+      return `export default ${JSON.stringify(out.outputFiles[0]!.text)};`;
+    },
+  };
+}
+
+/**
+ * dist/ladder-bots → data/bots. Lets a running `arena server` (which serves dist/ from disk)
+ * hand ladder bot code to the playground without a restart. /api/bots/:id/code is preferred.
+ */
+function ladderBotsLink(): Plugin {
+  return {
+    name: "arena-ladder-bots-link",
+    apply: "build",
+    closeBundle() {
+      const link = path.resolve(__dirname, "dist/ladder-bots");
+      fs.rmSync(link, { force: true, recursive: true });
+      fs.symlinkSync(path.relative(path.dirname(link), path.resolve(__dirname, "../data/bots")), link, "dir");
+    },
+  };
+}
+
+export default defineConfig({
+  base: "./",
+  plugins: [botBundle(), ladderBotsLink()],
+  // `pnpm playground` talks to a local ladder (`arena server`) if one is running on 8787.
+  server: { fs: { allow: [".."] }, proxy: { "/api": "http://127.0.0.1:8787" } },
+  worker: { format: "es" },
+  build: { target: "es2022", chunkSizeWarningLimit: 1500 },
+});

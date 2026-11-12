@@ -1,0 +1,27 @@
+{
+  "name": "bot-arena",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p engine && tsc -p sandbox && tsc -p server && tsc -p cli && tsc -p viewer",
+    "arena": "node --no-node-snapshot --import tsx cli/src/index.ts",
+    "playground": "pnpm --filter @arena/viewer dev",
+    "server": "node --no-node-snapshot --import tsx cli/src/index.ts server"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "isolated-vm",
+      "esbuild"
+    ]
+  }
+}

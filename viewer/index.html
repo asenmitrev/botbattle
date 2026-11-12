@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bot Arena</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%231a1a19'/><circle cx='5' cy='5' r='3' fill='%233987e5'/><circle cx='11' cy='11' r='3' fill='%23d95926'/></svg>" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand"><span class="dot p1"></span><span class="dot p2"></span> Bot Arena</div>
+        <div class="topbar-actions">
+          <label class="btn ghost" title="Open a replay .json file">Open replay<input id="file-input" type="file" accept=".json,application/json" hidden /></label>
+          <button id="download-btn" class="btn ghost" disabled>Download replay</button>
+          <button id="leaderboard-btn" class="btn" hidden>Leaderboard</button>
+          <button id="howto-btn" class="btn">How to play</button>
+          <button id="readme-btn" class="btn">README · Bot API</button>
+        </div>
+      </header>
+
+      <main class="split">
+        <section class="pane left" aria-label="Match viewer">
+          <div class="playback">
+            <button id="play-btn" class="btn icon" title="Play / pause (Space)">▶</button>
+            <button id="back-btn" class="btn icon" title="Step back (←)">⏮</button>
+            <button id="fwd-btn" class="btn icon" title="Step forward (→)">⏭</button>
+            <select id="speed" title="Playback speed">
+              <option value="1">1×</option><option value="2">2×</option><option value="4" selected>4×</option>
+              <option value="8">8×</option><option value="16">16×</option>
+            </select>
+            <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Timeline" />
+            <span id="tick-label" class="mono">0 / 0</span>
+          </div>
+          <div class="toggles">
+            <div class="seg" role="radiogroup" aria-label="Fog of war">
+              <label><input type="radio" name="fog" value="0" checked />Full map</label>
+              <label><input type="radio" name="fog" value="1" />P1 fog</label>
+              <label><input type="radio" name="fog" value="2" />P2 fog</label>
+            </div>
+            <label class="check"><input id="marks-toggle" type="checkbox" checked />Debug marks</label>
+            <label class="check"><input id="attacks-toggle" type="checkbox" checked />Attack lines</label>
+          </div>
+
+          <div class="board-row">
+            <div class="board-wrap">
+              <canvas id="board" aria-label="Game board"></canvas>
+              <button id="theater-btn" class="theater-btn" title="Fill the window with the battle (F)" aria-label="Fill window" aria-pressed="false">⛶</button>
+              <div id="hover-info" class="hover-info mono"></div>
+              <div id="result-banner" class="result-banner" hidden></div>
+            </div>
+            <aside class="side" aria-label="Match statistics">
+              <div id="stats"></div>
+              <div id="legend" class="legend" aria-label="Legend"></div>
+              <div class="chart-block">
+                <div class="chart-title">Score</div>
+                <div class="chart" data-series="score"></div>
+              </div>
+              <div class="chart-block">
+                <div class="chart-title">Units</div>
+                <div class="chart" data-series="units"></div>
+              </div>
+              <div class="chart-block">
+                <div class="chart-title">Banked energy</div>
+                <div class="chart" data-series="energy"></div>
+              </div>
+            </aside>
+          </div>
+
+          <div class="logs">
+            <div class="logs-head">
+              <div class="tabs" role="tablist">
+                <button class="tab active" data-tab="logs" role="tab">Bot logs</button>
+                <button class="tab" data-tab="problems" role="tab">Problems <span id="problem-count" class="badge">0</span></button>
+              </div>
+              <label class="check"><input id="log-p1" type="checkbox" checked /><span class="dot p1"></span>P1</label>
+              <label class="check"><input id="log-p2" type="checkbox" checked /><span class="dot p2"></span>P2</label>
+            </div>
+            <div id="log-list" class="log-list mono" role="log"></div>
+          </div>
+        </section>
+
+        <section class="pane right" aria-label="Bot editor">
+          <div class="runbar">
+            <label>Play as
+              <select id="side-select"><option value="1">P1</option><option value="2">P2</option></select>
+            </label>
+            <label>vs
+              <select id="opponent-select"></select>
+            </label>
+            <label>Seed <input id="seed-input" type="number" value="42" min="0" step="1" /></label>
+            <button id="dice-btn" class="btn icon" title="Random seed">🎲</button>
+            <button id="run-btn" class="btn primary">▶ Run match</button>
+            <button id="bench-btn" class="btn" title="10 matches on seeds 1-5, both sides">Run ×10</button>
+            <span id="ladder-controls" class="ladder-controls" hidden>
+              <input id="ladder-name" type="text" placeholder="bot name" maxlength="24" spellcheck="false" aria-label="Ladder bot name" />
+              <button id="submit-btn" class="btn" title="Submit this code to the ranked ladder">Submit to ladder</button>
+            </span>
+          </div>
+          <div id="editor" class="editor"></div>
+          <div class="editor-foot">
+            <span id="status" class="status mono">Ready.</span>
+            <button id="reset-btn" class="btn ghost small" title="Replace your code with the starter bot">Reset to starter</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="howto-dialog" class="howto" aria-labelledby="howto-title">
+      <button id="close-howto" class="btn ghost small howto-x" aria-label="Close">✕</button>
+      <h2 id="howto-title">How to play</h2>
+      <p class="howto-sub">You don't play — your bot does. Let an AI write it for you.</p>
+      <ol class="howto-steps">
+        <li><span class="howto-n">1</span><div><strong>Copy the README</strong><span>The full Bot API, in one click.</span></div><button id="howto-copy" class="btn primary small">Copy README</button></li>
+        <li><span class="howto-n">2</span><div><strong>Paste it into an AI</strong><span>ChatGPT, Claude, Gemini — any chat assistant.</span></div></li>
+        <li><span class="howto-n">3</span><div><strong>Ask it to build a bot</strong><span>“Write me a bot that rushes the enemy base” — or any strategy you like.</span></div></li>
+        <li><span class="howto-n">4</span><div><strong>Paste the code into the editor</strong><span>The code panel on the right. Replace everything in it.</span></div></li>
+        <li><span class="howto-n">5</span><div><strong>Play</strong><span>Hit <b>Run match</b> to battle a house bot, then <b>Submit to ladder</b> to climb the leaderboard.</span></div></li>
+      </ol>
+      <div class="howto-foot"><button id="howto-go" class="btn primary">Let's go</button></div>
+    </dialog>
+    <dialog id="readme-dialog" class="readme">
+      <div class="readme-head">
+        <strong>Bot API</strong>
+        <span class="muted">Paste this into an LLM and ask it to write a bot.</span>
+        <button id="copy-readme" class="btn primary small">Copy markdown</button>
+        <button id="close-readme" class="btn ghost small" aria-label="Close">✕</button>
+      </div>
+      <article id="readme-body" class="markdown"></article>
+    </dialog>
+    <dialog id="leaderboard-dialog" class="readme ladder">
+      <div class="readme-head">
+        <strong>Leaderboard</strong>
+        <span id="ladder-meta" class="muted"></span>
+        <button id="ladder-refresh" class="btn ghost small">Refresh</button>
+        <button id="close-ladder" class="btn ghost small" aria-label="Close">✕</button>
+      </div>
+      <div class="ladder-body">
+        <div id="season-bar" class="season-bar" role="tablist" aria-label="Season" hidden></div>
+        <div id="season-note" class="muted season-note" hidden></div>
+        <table class="ladder-table">
+          <thead><tr><th>#</th><th>Bot</th><th>Elo</th><th>W-L-D</th><th>Games</th><th>High score</th></tr></thead>
+          <tbody id="ladder-rows"></tbody>
+        </table>
+        <div id="ladder-matches" class="ladder-matches" hidden></div>
+      </div>
+    </dialog>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

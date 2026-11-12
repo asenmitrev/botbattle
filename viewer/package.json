@@ -1,0 +1,23 @@
+{
+  "name": "@arena/viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@arena/engine": "workspace:*",
+    "@codemirror/lang-javascript": "^6.2.2",
+    "@codemirror/lint": "^6.8.0",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "codemirror": "^6.0.1",
+    "marked": "^14.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5",
+    "vite": "^5.4.0"
+  }
+}

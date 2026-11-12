@@ -1,0 +1,7 @@
+packages:
+  - engine
+  - cli
+  - sandbox
+  - viewer
+  - server
+  - bots

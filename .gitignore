@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build output
+viewer/dist/
+
+# runtime data (ladder state, uploaded bots, match replays) — ~1GB, lives on the server
+data/
+data-backup-*/
+replays/
+
+# local / tooling
+.nwave/
+**/.nwave/
+botbattle/
+.DS_Store
+*.log
+.env
+.env.*
+coverage/
