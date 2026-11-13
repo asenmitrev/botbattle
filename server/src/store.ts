@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Replay } from "@arena/engine";
+import type { EconomyData } from "./economy.js";
 
 export interface BotRecord {
   id: string;
@@ -24,6 +25,8 @@ export interface BotRecord {
   highScoreMatch: string | null;
   createdAt: string;
   lastPlayedAt: string | null;
+  /** UTC day this bot last used its free daily version update (botcoin). */
+  lastFreeUpdateDay?: string | null;
 }
 
 export interface MatchSide {
@@ -53,6 +56,8 @@ export interface LadderData {
   bots: BotRecord[];
   /** Most recent last. Capped (see Ladder.maxMatches). */
   matches: MatchRecord[];
+  /** Botcoin wallets and bets (absent in older files). */
+  economy?: EconomyData;
 }
 
 export function emptyLadder(): LadderData {

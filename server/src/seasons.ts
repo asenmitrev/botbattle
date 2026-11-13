@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { emptyEconomy, resetEconomyForSeason } from "./economy.js";
+import { ELO } from "./elo.js";
 import { Ladder } from "./ladder.js";
-import { JsonFileStore, type LadderStore } from "./store.js";
+import { JsonFileStore, type BotRecord, type LadderData, type LadderStore } from "./store.js";
 
 /**
  * Past seasons = backups of the data dir that sit next to it, named `<data>-backup-YYYYMMDD-HHMMSS`
@@ -106,4 +108,61 @@ export class Seasons {
   get(id: string): { ladder: Ladder; store: LadderStore } | null {
     return this.ids().includes(id) ? this.open(id) : null;
   }
+}
+
+/**
+ * Start a new season. The data dir is renamed to `<data>-backup-YYYYMMDD-HHMMSS` (local time, which is how
+ * Seasons reads it), so nothing is copied and old replays stay with the archive. A fresh data dir is then
+ * written with every bot carried over:
+ * - Each bot keeps its code, name, tokens and owner and goes back to 1200 Elo with no games.
+ * - Match history and replays start empty.
+ * - Botcoin wallets carry over, and open bets are refunded.
+ * `minElo`: bots that finished the season below it are left behind. They stay in the archive, code included.
+ * The ladder server must be stopped first, or it will overwrite the new ladder.json with its in-memory state.
+ */
+export function startNewSeason(
+  dataDir: string,
+  now: Date = new Date(),
+  opts: { minElo?: number } = {},
+): { archive: string; bots: number; dropped: { name: string; elo: number }[]; refundedBets: number } {
+  const abs = path.resolve(dataDir);
+  const ladderFile = path.join(abs, "ladder.json");
+  if (!fs.existsSync(ladderFile)) throw new Error(`no ladder.json in ${abs}`);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  const archive = `${abs}-backup-${stamp}`;
+  if (fs.existsSync(archive)) throw new Error(`${archive} already exists`);
+
+  const old = new JsonFileStore(abs).load();
+  const openBets = (old.economy?.bets ?? []).filter((b) => !b.settledAt).length;
+  const economy = resetEconomyForSeason(old.economy ?? emptyEconomy(), () => now);
+  fs.renameSync(abs, archive);
+
+  const fresh = new JsonFileStore(abs); // creates data/, bots/, replays/
+  const oldStore = new JsonFileStore(archive);
+  // Compare the Elo the leaderboard shows (rounded): a bot listed at 1200 isn't "below 1200".
+  const keep = (b: BotRecord) => opts.minElo === undefined || Math.round(b.elo) >= opts.minElo;
+  const dropped = old.bots.filter((b) => !keep(b)).map((b) => ({ name: b.name, elo: Math.round(b.elo) }));
+  const bots: BotRecord[] = old.bots.filter(keep).map((b) => {
+    if (!b.house) {
+      const code = oldStore.loadCode(b.id);
+      if (code !== null) fresh.saveCode(b.id, code);
+    }
+    return {
+      ...b,
+      elo: ELO.initial,
+      games: 0,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+      gamesSinceVersion: 0,
+      highScore: null,
+      highScoreMatch: null,
+      lastPlayedAt: null,
+    };
+  });
+  // Counters keep counting, so match ids and seeds never repeat across seasons.
+  const data: LadderData = { formatVersion: 1, nextSeed: old.nextSeed, nextMatch: old.nextMatch, bots, matches: [], economy };
+  fresh.save(data);
+  return { archive, bots: bots.length, dropped, refundedBets: openBets };
 }

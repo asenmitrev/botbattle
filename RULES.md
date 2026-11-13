@@ -1,4 +1,4 @@
-# Bot Arena — Rules (v1, config 1.8.0)
+# Bot Arena — Rules (v1, config 1.9.0)
 
 This file is the human-readable source of truth. Every number here comes from
 `engine/src/config.ts`; if they ever disagree, that is a bug — fix both.
@@ -90,7 +90,7 @@ the next tick. A bot whose initialization fails fails every tick.
 | Fighter | 60 E + 15 C | 30 | 1 | 5 | attack 6 dmg, range 1 |
 | Scout | 30 E | 5 | 2 (4 with Scout Speed) | 9 | attack 1 dmg, range 1 |
 
-- **Base**: 200 HP, vision 7. Additional bases cost 100 energy and are built by workers with `structure: "base"`. Bases cannot move and are never hurt by the zone.
+- **Base**: 200 HP, vision 7. Additional bases cost 100 energy + 50 crystals and are built by workers with `structure: "base"`. Bases cannot move and are never hurt by the zone.
 - **Spawning**: at most 1 unit per player per tick, regardless of base count. An optional `baseId` selects a living friendly base. Without it, living friendly bases are tried in ascending ID order until a free spawn tile is found. Newly built bases can spawn starting next tick.
 - **Spawn tile**: the first free tile adjacent to the base, checked in the order
   (+1,+1) (+1,0) (0,+1) (+1,−1) (−1,+1) (0,−1) (−1,0) (−1,−1). Player 2 uses the negated
@@ -98,18 +98,18 @@ the next tick. A bot whose initialization fails fails every tick.
 
 ## 7. Structures
 
-A worker builds on an empty floor tile adjacent to it. Building is instant and paid in energy.
+A worker builds on an empty floor tile adjacent to it. Building is instant and paid from your banked resources (turrets and walls cost energy; bases cost energy and crystal).
 
 | Structure | Cost | HP | Notes |
 |---|---|---|---|
 | Turret | 100 E | 50 | 4 dmg, range 4, vision 4. Must be within Chebyshev 8 of any living friendly base. Auto-targets the lowest-HP enemy **unit** in range (ties → lowest ID). |
 | Wall | 5 E | 60 | Blocks movement. No vision. |
-| Base | 100 E | 200 | Vision 7, resource deposits, spawning, and turret placement within Chebyshev 8. No distance limit for construction. Immune to zone damage. |
+| Base | 100 E + 50 C | 200 | Vision 7, resource deposits, spawning, and turret placement within Chebyshev 8. No distance limit for construction. Immune to zone damage. |
 
 - The tile must be empty *after movement* this tick: no unit, structure, base or node.
 - If both players build on the same tile in the same tick, both builds fail.
   If two of your own workers pick the same tile, the lower unit ID builds.
-- Builds are paid in unit-ID order, so if energy runs out the later builds fail.
+- Builds are paid in unit-ID order, so if energy or crystal runs out the later builds fail. A build fails unless both costs are covered, and nothing is deducted when it fails.
 - Turrets may be built within Chebyshev 8 of **any living friendly base**, not just the starting base. The base must exist before this tick's build phase. Existing turrets keep working if a nearby base is destroyed.
 - Destroyed bases no longer block movement or construction, provide vision, accept deposits, or spawn units. They remain in replay state with 0 HP; bots' `myBases` includes only living bases.
 

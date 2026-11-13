@@ -190,3 +190,54 @@ dialog.howto::backdrop { background: rgba(0,0,0,.65); }
 .howto-steps li span:not(.howto-n) { color: var(--text-secondary); font-size: 12px; }
 .howto-n { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #fff; background: linear-gradient(135deg, #3987e5, #d95926); }
 .howto-foot { display: flex; justify-content: flex-end; margin-top: 18px; }
+
+/* Botcoin */
+:root { --gold: #f2b84b; --gold-strong: #ffcf66; --gold-ink: #2a1d00; --gold-soft: color-mix(in srgb, var(--gold) 14%, transparent); }
+.wallet-wrap { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.wallet-wrap[hidden] { display: none; }
+.wallet-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; font: 600 13px var(--sans); color: var(--gold-strong); background: var(--gold-soft); border: 1px solid color-mix(in srgb, var(--gold) 55%, transparent); border-radius: 999px; padding: 4px 12px 4px 8px; cursor: pointer; }
+.wallet-chip:hover { background: color-mix(in srgb, var(--gold) 22%, transparent); }
+.wallet-chip .coin { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font: 800 11px var(--sans); color: #7a4f00; background: radial-gradient(circle at 35% 30%, #fff1b8, var(--gold) 55%, #b77d12); box-shadow: inset 0 0 0 1.5px #d99a1e; }
+.wallet-balance { font: 700 15px var(--mono); font-variant-numeric: tabular-nums; }
+.wallet-unit { font-weight: 500; font-size: 11px; color: color-mix(in srgb, var(--gold-strong) 75%, var(--text-muted)); }
+.wallet-chip.flash { animation: coin-flash .9s ease-out; }
+@keyframes coin-flash { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 80%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+.wallet-delta { position: absolute; right: 8px; top: -4px; font: 700 12px var(--mono); pointer-events: none; opacity: 0; }
+.wallet-delta.show { animation: coin-float 1.4s ease-out; }
+.wallet-delta.up { color: var(--ok); }
+.wallet-delta.down { color: var(--danger); }
+@keyframes coin-float { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-18px); } }
+.stipend-btn { font: 700 12px var(--sans); color: var(--gold-ink); background: var(--gold); border: 0; border-radius: 999px; padding: 5px 11px; cursor: pointer; animation: coin-pulse 1.8s ease-in-out infinite; }
+.stipend-btn:hover { background: var(--gold-strong); }
+.stipend-btn[hidden] { display: none; }
+@keyframes coin-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 70%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; } }
+@media (prefers-reduced-motion: reduce) { .stipend-btn, .wallet-chip.flash, .wallet-delta.show { animation: none; } .wallet-delta.show { opacity: 1; } }
+.wallet-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 50; width: min(340px, calc(100vw - 32px)); padding: 12px 14px; background: var(--surface-1); border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border)); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.45); font-size: 12px; }
+.wallet-pop[hidden] { display: none; }
+.wallet-pop h4 { margin: 0 0 6px; font-size: 14px; color: var(--gold-strong); }
+.wallet-pop .big { font: 700 22px var(--mono); color: var(--gold-strong); }
+.wallet-pop ul { margin: 6px 0; padding-left: 16px; color: var(--text-secondary); }
+.wallet-pop li { margin: 2px 0; }
+.wallet-pop .ledger { max-height: 140px; overflow: auto; margin-top: 4px; }
+.wallet-pop .ledger div { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+.wallet-pop .up { color: var(--ok); } .wallet-pop .down { color: var(--danger); }
+.ladder-wallet { font: 700 13px var(--mono); color: var(--gold-strong); background: var(--gold-soft); border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent); border-radius: 999px; padding: 2px 10px; }
+.ladder-wallet[hidden] { display: none; }
+.cost-badge { display: inline-block; margin-left: 6px; font: 700 11px var(--mono); color: var(--gold-ink); background: var(--gold); border-radius: 999px; padding: 0 7px; }
+.free-badge { display: inline-block; margin-left: 6px; font: 700 10px var(--sans); color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 60%, transparent); border-radius: 999px; padding: 0 6px; text-transform: uppercase; letter-spacing: .03em; }
+.coin-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 8px 0 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--gold) 50%, var(--border)); border-radius: 8px; background: var(--gold-soft); font-size: 12px; }
+.coin-panel .coin-title { font-weight: 700; color: var(--gold-strong); margin-right: 4px; }
+.coin-panel .group { display: inline-flex; align-items: center; gap: 6px; }
+.coin-panel select, .coin-panel input { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 2px 4px; }
+.coin-panel input { width: 60px; }
+.coin-panel .btn { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); font-weight: 700; }
+.coin-panel .btn:hover { background: var(--gold-strong); }
+.coin-panel .muted { font-size: 11px; }
+.coin-panel .bal { margin-left: auto; font: 700 13px var(--mono); color: var(--gold-strong); }
+.tag.boost { background: color-mix(in srgb, var(--gold) 30%, transparent); color: var(--gold-strong); }
+.tag.bet { background: color-mix(in srgb, var(--ok) 25%, transparent); color: var(--text-primary); }
+.bet-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.bet-row .up { color: var(--ok); }
+.wallet-pop .pop-section { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); }
+.wallet-pop .bet-line { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.wallet-pop .bet-line span:last-child { font-family: var(--mono); white-space: nowrap; }

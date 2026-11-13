@@ -14,26 +14,42 @@ function addBase(s: GameState, owner: PlayerId, x: number, y: number, hp: number
 }
 
 describe("additional bases", () => {
-  it.each([99, 100])("building a base requires 100 energy with %i available", (energy) => {
+  it.each([
+    { energy: 99, crystal: 50, ok: false },
+    { energy: 100, crystal: 49, ok: false },
+    { energy: 100, crystal: 0, ok: false },
+    { energy: 100, crystal: 50, ok: true },
+  ])("building a base requires 100 energy + 50 crystals ($energy E, $crystal C available)", ({ energy, crystal, ok }) => {
     const s = testState();
     s.players[0].energy = energy;
-    s.players[0].crystal = 0;
+    s.players[0].crystal = crystal;
     const worker = addUnit(s, 1, "worker", 20, 20);
     const before = JSON.stringify(s);
     const { state, events } = step(s, [
       { type: "build", unitId: worker.id, structure: "base", x: 21, y: 20 },
     ], []);
-    expect(state.bases).toHaveLength(energy === 100 ? 3 : 2);
-    expect(state.players[0].energy).toBe(energy === 100 ? 0 : energy);
+    expect(state.bases).toHaveLength(ok ? 3 : 2);
+    expect(state.players[0].energy).toBe(ok ? energy - 100 : energy);
+    expect(state.players[0].crystal).toBe(ok ? crystal - 50 : crystal);
     expect(state.structures).toHaveLength(0);
     expect(JSON.stringify(s)).toBe(before);
-    expect(canAfford(buildBotView(s, 1), "base")).toBe(energy === 100);
-    if (energy === 100) {
+    expect(canAfford(buildBotView(s, 1), "base")).toBe(ok);
+    if (ok) {
       expect(state.bases[2]).toMatchObject({ owner: 1, x: 21, y: 20, hp: 200 });
       expect(events).toContainEqual(expect.objectContaining({ type: "build", structure: "base" }));
     } else {
-      expect(events).toContainEqual(expect.objectContaining({ type: "invalid_action", reason: "not enough energy" }));
+      expect(events).toContainEqual(expect.objectContaining({ type: "invalid_action", reason: "not enough resources" }));
     }
+  });
+
+  it("deducts both energy and crystals when a base is built", () => {
+    const s = testState();
+    const worker = addUnit(s, 1, "worker", 20, 20);
+    const { state } = step(s, [
+      { type: "build", unitId: worker.id, structure: "base", x: 21, y: 20 },
+    ], []);
+    expect(state.bases).toHaveLength(3);
+    expect(state.players[0]).toMatchObject({ energy: 900, crystal: 950 });
   });
 
   it("rejects non-workers, distant sites, occupied sites, and terrain walls", () => {
@@ -61,7 +77,7 @@ describe("additional bases", () => {
       { type: "build", unitId: a.id, structure: "base", x: 20, y: 20 },
     ], [{ type: "build", unitId: b.id, structure: "base", x: 20, y: 20 }]);
     expect(state.bases).toHaveLength(2);
-    expect(state.players.map((p) => p.energy)).toEqual([1000, 1000]);
+    expect(state.players.map((p) => [p.energy, p.crystal])).toEqual([[1000, 1000], [1000, 1000]]);
     expect(events.filter((e) => e.type === "invalid_action")).toHaveLength(2);
   });
 
@@ -153,12 +169,14 @@ describe("additional bases", () => {
     expect(unit(second, depositor.id)!.cargo.energy).toBe(0);
     expect(second.structures).toHaveLength(1);
     expect(second.players[0].energy).toBe(820);
+    expect(second.players[0].crystal).toBe(950);
   });
 
   it("resources deposited this tick can pay for building an additional base", () => {
     const s = testState();
     s.players[0].energy = 80;
-    const depositor = addUnit(s, 1, "worker", 5, 4, { cargo: { energy: 20, crystal: 0 } });
+    s.players[0].crystal = 30;
+    const depositor = addUnit(s, 1, "worker", 5, 4, { cargo: { energy: 20, crystal: 20 } });
     const builder = addUnit(s, 1, "worker", 20, 20);
     const { state } = step(s, [
       { type: "build", unitId: builder.id, structure: "base", x: 21, y: 20 },
@@ -166,6 +184,7 @@ describe("additional bases", () => {
     ], []);
     expect(state.bases).toHaveLength(3);
     expect(state.players[0].energy).toBe(0);
+    expect(state.players[0].crystal).toBe(0);
   });
 
   it.each(["enemy", "destroyed", "missing"])("rejects spawning at a %s base", (kind) => {
@@ -309,6 +328,10 @@ describe("additional bases", () => {
   });
 
   it("replay verification reproduces base construction and selected-base spawning", () => {
+    const { startEnergy, startCrystal } = CONFIG.match;
+    CONFIG.match.startEnergy = CONFIG.base.costEnergy + CONFIG.units.worker.costEnergy;
+    CONFIG.match.startCrystal = CONFIG.base.costCrystal;
+    try {
     let s = createInitialState(42);
     const recorder = new ReplayRecorder(42, ["builder", "idle"], s);
     const worker = s.units.find((u) => u.owner === 1)!;
@@ -322,5 +345,9 @@ describe("additional bases", () => {
     const second = step(s, spawn, []);
     recorder.record(s, [spawn, []], second.events);
     expect(verifyReplay(recorder.finish(second.state)).ok).toBe(true);
+    } finally {
+      CONFIG.match.startEnergy = startEnergy;
+      CONFIG.match.startCrystal = startCrystal;
+    }
   });
 });

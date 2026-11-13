@@ -542,12 +542,12 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
         continue;
       }
       const spec = r.act.structure === "base" ? CONFIG.base : CONFIG.structures[r.act.structure];
-      const cost = spec.costEnergy;
-      if (pl.energy < cost) {
-        events.push({ type: "invalid_action", player: p, action: r.act, reason: "not enough energy" });
+      if (pl.energy < spec.costEnergy || pl.crystal < spec.costCrystal) {
+        events.push({ type: "invalid_action", player: p, action: r.act, reason: "not enough resources" });
         continue;
       }
-      pl.energy -= cost;
+      pl.energy -= spec.costEnergy;
+      pl.crystal -= spec.costCrystal;
       const id = state.nextId++;
       if (r.act.structure === "base") {
         state.bases.push({ id, owner: p, x: r.act.x, y: r.act.y, hp: spec.hp });

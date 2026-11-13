@@ -13,6 +13,14 @@
         <div class="topbar-actions">
           <label class="btn ghost" title="Open a replay .json file">Open replay<input id="file-input" type="file" accept=".json,application/json" hidden /></label>
           <button id="download-btn" class="btn ghost" disabled>Download replay</button>
+          <span id="wallet-wrap" class="wallet-wrap" hidden>
+            <button id="wallet-chip" class="wallet-chip" aria-haspopup="true" aria-expanded="false" title="Your botcoin: click for details">
+              <span class="coin" aria-hidden="true">B</span><span id="wallet-balance" class="wallet-balance">0</span><span class="wallet-unit">botcoin</span>
+              <span id="wallet-delta" class="wallet-delta" aria-hidden="true"></span>
+            </button>
+            <button id="stipend-btn" class="stipend-btn" title="Claim today's free botcoin" hidden>Claim +20</button>
+            <div id="wallet-pop" class="wallet-pop" role="dialog" aria-label="Botcoin" hidden></div>
+          </span>
           <button id="leaderboard-btn" class="btn" hidden>Leaderboard</button>
           <button id="howto-btn" class="btn">How to play</button>
           <button id="readme-btn" class="btn">README · Bot API</button>
@@ -131,7 +139,9 @@
     <dialog id="leaderboard-dialog" class="readme ladder">
       <div class="readme-head">
         <strong>Leaderboard</strong>
+        <span id="ladder-wallet" class="ladder-wallet" hidden></span>
         <span id="ladder-meta" class="muted"></span>
+        <button id="bets-btn" class="btn ghost small" title="Recent botcoin bets on the ladder">Bets</button>
         <button id="ladder-refresh" class="btn ghost small">Refresh</button>
         <button id="close-ladder" class="btn ghost small" aria-label="Close">✕</button>
       </div>

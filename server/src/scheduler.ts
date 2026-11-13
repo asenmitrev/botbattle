@@ -4,7 +4,9 @@ export interface Job {
   p1: string;
   p2: string;
   seed: number;
-  reason: "placement" | "background";
+  reason: "placement" | "boost" | "background";
+  /** Boost jobs: the bot that paid for them. */
+  boostFor?: string;
 }
 
 export interface SchedulerOptions {
@@ -105,6 +107,37 @@ export class Scheduler {
     return jobs.length;
   }
 
+  /**
+   * Boost (paid with botcoin): `pairs` extra pairs for this bot, each vs an opponent picked like a
+   * background game (pairings played recently are damped), both sides on one seed. They go after
+   * placement and earlier boosts, ahead of background games. Returns the games queued.
+   */
+  enqueueBoost(botId: string, pairs: number): number {
+    if (!this.ladder.bot(botId) || this.ladder.data.bots.length < 2) return 0;
+    const jobs: Job[] = [];
+    for (let i = 0; i < pairs; i++) {
+      const opp = this.pickOpponent(botId, jobs);
+      const seed = this.ladder.nextSeed();
+      jobs.push({ p1: botId, p2: opp, seed, reason: "boost", boostFor: botId }, { p1: opp, p2: botId, seed, reason: "boost", boostFor: botId });
+    }
+    const firstBackground = this.queue.findIndex((j) => j.reason === "background");
+    this.queue.splice(firstBackground === -1 ? this.queue.length : firstBackground, 0, ...jobs);
+    this.wake();
+    return jobs.length;
+  }
+
+  /** Boost pairs queued (not yet started) for this bot. */
+  boostQueued(botId: string): number {
+    return Math.ceil(this.queue.filter((j) => j.boostFor === botId).length / 2);
+  }
+
+  /** Boost pairs queued per bot (for the leaderboard). */
+  boostCounts(): Map<string, number> {
+    const jobs = new Map<string, number>();
+    for (const j of this.queue) if (j.boostFor) jobs.set(j.boostFor, (jobs.get(j.boostFor) ?? 0) + 1);
+    return new Map([...jobs].map(([id, n]) => [id, Math.ceil(n / 2)]));
+  }
+
   /** Drop queued games involving a (deleted) bot. A game already running is discarded by Ladder.playGame. */
   dropBot(botId: string): number {
     let n = 0;
@@ -145,17 +178,31 @@ export class Scheduler {
     }
     // Who plays: anyone can, but under-played bots are much more likely.
     const me = pick(bots, (b) => 1 / (1 + (played.get(b.id) ?? 0)) ** 2, this.opts.random);
-    // Against whom: uniform over the ladder, except pairings played recently are damped.
-    const opp = pick(
-      bots.filter((b) => b.id !== me.id),
-      (b) => 1 / (1 + (pairs.get(pairKey(me.id, b.id)) ?? 0)) ** 2,
-      this.opts.random,
-    );
+    const opp = this.pickOpponent(me.id, [], pairs);
     const seed = this.ladder.nextSeed();
     return [
-      { p1: me.id, p2: opp.id, seed, reason: "background" },
-      { p1: opp.id, p2: me.id, seed, reason: "background" },
+      { p1: me.id, p2: opp, seed, reason: "background" },
+      { p1: opp, p2: me.id, seed, reason: "background" },
     ];
+  }
+
+  /** Recent pairing counts: the fairness window, games in flight, and `extra` jobs about to be queued. */
+  private recentPairs(extra: readonly Job[] = []): Map<string, number> {
+    const pairs = new Map<string, number>();
+    const add = (a: string, b: string) => pairs.set(pairKey(a, b), (pairs.get(pairKey(a, b)) ?? 0) + 1);
+    for (const m of this.ladder.data.matches.slice(-this.opts.fairnessWindow)) add(m.p1.id, m.p2.id);
+    for (const j of this.inFlight) add(j.p1, j.p2);
+    for (const j of extra) add(j.p1, j.p2);
+    return pairs;
+  }
+
+  /** Against whom: uniform over the ladder, except pairings played recently are damped. */
+  private pickOpponent(meId: string, extra: readonly Job[] = [], pairs = this.recentPairs(extra)): string {
+    return pick(
+      this.ladder.data.bots.filter((b) => b.id !== meId),
+      (b) => 1 / (1 + (pairs.get(pairKey(meId, b.id)) ?? 0)) ** 2,
+      this.opts.random,
+    ).id;
   }
 
   /** One playing slot. `concurrency` of these run side by side, sharing the queue. */

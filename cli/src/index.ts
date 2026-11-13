@@ -24,7 +24,8 @@ const USAGE = `Usage:
   arena verify <replay.json>
   arena view <replay.json> [--port N] [--no-open]   open a replay in the web viewer
   arena playground [--port N] [--no-open]          open the browser playground (editor + viewer)
-  arena server [--port 8787] [--data ./data] [--host 127.0.0.1] [--no-autoplay] [--concurrency 8] [--trust-proxy]
+  arena server [--port 8787] [--data ./data] [--host 127.0.0.1] [--no-autoplay] [--concurrency 8] [--trust-proxy] [--house-bots none|a,b]
+  arena new-season [--data ./data] [--min-elo N]  archive the ladder as a past season and restart it (server stopped)
                                                    ranked ladder: playground + Elo leaderboard + API`;
 
 interface Args {
@@ -218,6 +219,9 @@ async function cmdServer(args: Args): Promise<void> {
     host: typeof args.flags.host === "string" ? args.flags.host : "127.0.0.1",
     dataDir: typeof args.flags.data === "string" ? args.flags.data : "data",
     trustProxy: args.flags["trust-proxy"] === true,
+    ...(typeof args.flags["house-bots"] === "string"
+      ? { houseBots: args.flags["house-bots"] === "none" ? [] : args.flags["house-bots"].split(",").map((s) => s.trim()).filter(Boolean) }
+      : {}),
     scheduler: { autoplay: !args.flags["no-autoplay"], concurrency: intFlag(args.flags, "concurrency", 8), onMatch: (id) => console.log(`played ${id}`) },
   });
   console.log(`Ladder server at ${srv.url}  (data: ${typeof args.flags.data === "string" ? args.flags.data : "data"}; Ctrl+C to stop)`);
@@ -229,6 +233,17 @@ async function cmdServer(args: Args): Promise<void> {
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
   await new Promise(() => {});
+}
+
+/** Archive the data dir as a past season and start a fresh ladder with the same bots. Stop the server first. */
+async function cmdNewSeason(args: Args): Promise<void> {
+  const { startNewSeason } = await import("@arena/server");
+  const dir = typeof args.flags.data === "string" ? args.flags.data : "data";
+  const minElo = typeof args.flags["min-elo"] === "string" ? Number(args.flags["min-elo"]) : undefined;
+  if (minElo !== undefined && !Number.isFinite(minElo)) throw new Error("--min-elo must be a number");
+  const r = startNewSeason(dir, new Date(), { minElo });
+  console.log(`New season: archived ${dir} as ${r.archive}; ${r.bots} bots carried over at 1200 Elo; ${r.refundedBets} open bet(s) refunded.`);
+  if (r.dropped.length) console.log(`Left behind (below ${minElo} Elo): ${r.dropped.map((d) => `${d.name} (${d.elo})`).join(", ")}`);
 }
 
 async function main(): Promise<void> {
@@ -245,6 +260,8 @@ async function main(): Promise<void> {
       return cmdView(args);
     case "server":
       return cmdServer(args);
+    case "new-season":
+      return cmdNewSeason(args);
     case "playground":
       return cmdView({ positional: [], flags: args.flags });
     default:

@@ -57,7 +57,7 @@ restarts, so keep anything important in `memory`.
 On a 40×40 point-symmetric map, you start with a base (200 HP), 150 energy and 2 workers.
 Workers harvest energy nodes (near your base) and crystal nodes (in the contested center),
 carry it home and deposit it. Spend energy and crystal on units, structures and upgrades. Destroy
-all enemy bases to win. Workers can build extra bases for 100 energy and deposit at any friendly base.
+all enemy bases to win. Workers can build extra bases for 100 energy + 50 crystals and deposit at any friendly base.
 Otherwise, at tick 500 the player with **more living units** wins
 (any unit type counts as 1; structures and bases don't count). Equal unit counts are broken by **score**:
 `energy + 3×crystal + value of living units + 2×total surviving friendly base HP`, and equal score is a draw. From tick 400 a safe circle
@@ -112,7 +112,7 @@ Each unit gets at most **one** action per tick; extras are ignored.
 | `{ type: "harvest", unitId, nodeId }` | Worker adjacent to a node takes up to 5 into cargo. |
 | `{ type: "deposit", unitId }` | Worker adjacent to any living friendly base banks all cargo in the player's shared resource balance. |
 | `{ type: "attack", unitId, targetId }` | Fighter hits an adjacent enemy unit, structure or base. |
-| `{ type: "build", unitId, structure: "turret"\|"wall"\|"base", x, y }` | Worker builds on an adjacent empty floor tile. Bases cost 100 energy and have no construction distance limit. |
+| `{ type: "build", unitId, structure: "turret"\|"wall"\|"base", x, y }` | Worker builds on an adjacent empty floor tile. Bases cost 100 energy + 50 crystals and have no construction distance limit. |
 | `{ type: "spawn", unit: "worker"\|"fighter"\|"scout", baseId? }` | Spawn beside a living friendly base. Optional `baseId` selects it; otherwise try bases in ascending ID order. Max 1 spawn per player per tick. |
 | `{ type: "upgrade", upgrade: "cargo"\|"armor"\|"weapons"\|"scoutSpeed" }` | One-time global upgrade, effective immediately for current and future eligible units. |
 | `{ type: "log", text }` | Message shown in the replay viewer. |
@@ -127,7 +127,7 @@ Each unit gets at most **one** action per tick; extras are ignored.
 | Scout | 30 E | 5 | 2 (4 with Scout Speed) | 9 | attack 1 dmg, range 1; cannot carry |
 | Turret | 100 E | 50 | – | 4 | auto-shoots lowest-HP enemy unit within 4 for 4 dmg; must be within 8 of any living friendly base |
 | Wall | 5 E | 60 | – | – | blocks movement |
-| Base | 100 E | 200 | – | 7 | deposits, spawning, turret placement within 8; immune to zone damage |
+| Base | 100 E + 50 C | 200 | – | 7 | deposits, spawning, turret placement within 8; immune to zone damage |
 | Upgrade Cargo | 30 C | | | | |
 | Upgrade Armor | 40 C | | | | your units take 2 less damage (min 1) |
 | Upgrade Weapons | 40 C | | | | |

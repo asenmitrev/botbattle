@@ -70,3 +70,43 @@ describe("past seasons", () => {
     expect((await get("/api/seasons/20260101-120000/whatever")).status).toBe(404);
   });
 });
+
+describe("startNewSeason", () => {
+  it("archives the data dir and restarts the ladder with the same bots, wallets kept, open bets refunded", async () => {
+    const { startNewSeason, Seasons } = await import("../src/index.js");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "new-season-"));
+    const dir = path.join(root, "data");
+    const l = new Ladder(new JsonFileStore(dir));
+    const owner = "f".repeat(64);
+    const { bot } = l.submit("keeper", "export function onTick(){return []}", { owner });
+    Object.assign(bot, { elo: 1500, games: 9, wins: 9, highScore: 77, highScoreMatch: "m0000009" });
+    l.data.nextMatch = 10;
+    l.placeBet(bot.id, { owner }, 30, 4);
+    const loser = l.submit("loser", "export function onTick(){return []}", { owner }).bot;
+    loser.elo = 1199.4; // shown as 1199
+    const even = l.submit("even", "export function onTick(){return []}", { owner }).bot;
+    even.elo = 1199.5; // shown as 1200
+    l.save();
+
+    const r = startNewSeason(dir, new Date(2026, 10, 13, 15, 4, 5), { minElo: 1200 });
+    expect(r).toMatchObject({ archive: `${dir}-backup-20261113-150405`, bots: 2, refundedBets: 1, dropped: [{ name: "loser", elo: 1199 }] });
+    // The archive is the old ladder, untouched.
+    expect(JSON.parse(fs.readFileSync(path.join(r.archive, "ladder.json"), "utf8")).bots[0].elo).toBe(1500);
+    const fresh = new Ladder(new JsonFileStore(dir));
+    const b = fresh.bot(bot.id)!;
+    expect(b).toMatchObject({ name: "keeper", elo: 1200, games: 0, wins: 0, highScore: null, version: 1 });
+    expect(fresh.owns(b, { owner })).toBe(true);
+    expect(fresh.store.loadCode(b.id)).toContain("onTick");
+    expect(fresh.data.matches).toEqual([]);
+    expect(fresh.data.nextMatch).toBe(10);
+    expect(fresh.bot(loser.id)).toBeUndefined(); // below 1200: stays in the archive only
+    expect(fresh.store.loadCode(loser.id)).toBeNull();
+    expect(new JsonFileStore(r.archive).loadCode(loser.id)).toContain("onTick");
+    expect(fresh.bot(even.id)).toBeDefined(); // shown as 1200: carries over
+    expect(fresh.walletView(owner).balance).toBe(100 - 30 - 30); // the bet stake came back; two extra bots cost 30 each
+    expect(fresh.economy.openBet(b.id)).toBeUndefined();
+    expect(new Seasons(dir).list().map((s) => s.id)).toEqual(["20261113-150405"]);
+    expect(() => startNewSeason(path.join(root, "nope"))).toThrow(/no ladder.json/);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});

@@ -24,6 +24,38 @@ interface Row {
   version: number;
   provisional: boolean;
   house: boolean;
+  /** Queued boost pairs. */
+  boosted?: number;
+  openBet?: { stake: number; games: number; played: number } | null;
+}
+
+interface PublicBet {
+  id: string;
+  botId: string;
+  botName: string;
+  stake: number;
+  games: number;
+  played: number;
+  actual: number;
+  expected: number;
+  placedAt: string;
+  settledAt: string | null;
+  payout: number | null;
+  outcome: "settled" | "refunded" | null;
+}
+
+interface WalletView {
+  exists: boolean;
+  balance: number;
+  stipendAvailable: boolean;
+  nextNewBotCost: number;
+  bots: { id: string; name: string; nextUpdateCost: number }[];
+  ledger: { at: string; delta: number; kind: string; ref?: string; count?: number }[];
+  bets: PublicBet[];
+  prices: {
+    boostPairCost: number; maxBoostPairsQueued: number; betMinStake: number; betMaxStake: number; betGames: number[]; dailyStipend: number;
+    newBotCost: number; updateCost: number; winPayout: number; drawPayout: number;
+  };
 }
 
 interface Side {
@@ -108,7 +140,18 @@ function owner(): string {
   return ownerKey;
 }
 
+/** Botcoin amount: up to 2 decimals, trailing zeros trimmed (132, 132.1, 132.05). */
+const coin = (x: number) => String(Math.round(x * 100) / 100);
+const signed = (x: number) => `${x >= 0 ? "+" : ""}${coin(x)}`;
+
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+async function postJSON<T>(url: string, body: unknown): Promise<T> {
+  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const out = (await r.json().catch(() => ({}))) as T & { error?: string };
+  if (!r.ok) throw new Error(out.error ?? `HTTP ${r.status}`);
+  return out;
+}
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url, { cache: "no-store" });
@@ -145,7 +188,152 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     }
   }
   void syncMine();
+
+  // ---------------------------------------------------------------- botcoin wallet
+  let wallet: WalletView | null = null;
+  const submitBtnEl = $<HTMLButtonElement>("submit-btn");
+  async function loadWallet(): Promise<void> {
+    try {
+      wallet = await postJSON<WalletView>("/api/wallet", { owner: owner() });
+    } catch {
+      wallet = null;
+    }
+    renderWallet();
+    announceSettled();
+  }
+  /** What submitting the typed name would cost from this browser's wallet. */
+  function submitCost(): number {
+    if (!wallet) return 0;
+    const n = nameInput.value.trim().toLowerCase();
+    const mineBot = wallet.bots.find((b) => b.name.toLowerCase() === n);
+    return mineBot ? mineBot.nextUpdateCost : wallet.nextNewBotCost;
+  }
+  let shownBalance: number | null = null;
+  const LEDGER_LABEL: Record<string, string> = {
+    grant: "Starting grant", stipend: "Daily stipend", win: "Wins", draw: "Draws", boost: "Boost", bet: "Bet placed",
+    payout: "Bet payout", refund: "Bet refund", submit: "Submission", admin: "Adjustment",
+  };
+  function renderWallet(): void {
+    $("wallet-wrap").hidden = false;
+    const bal = wallet?.exists ? wallet.balance : 0;
+    $("wallet-balance").textContent = coin(bal);
+    // Flash the chip and float the difference whenever the balance moves (wins, payouts, spending).
+    if (shownBalance !== null && wallet?.exists && bal !== shownBalance) {
+      const d = bal - shownBalance;
+      const chip = $("wallet-chip");
+      const delta = $("wallet-delta");
+      delta.textContent = signed(d);
+      delta.className = `wallet-delta ${d > 0 ? "up" : "down"}`;
+      chip.classList.remove("flash");
+      void delta.offsetWidth; // restart the animations
+      delta.classList.add("show");
+      chip.classList.add("flash");
+    }
+    if (wallet?.exists) shownBalance = bal;
+    const st = $("stipend-btn");
+    st.hidden = !wallet?.exists || !wallet.stipendAvailable;
+    if (wallet) st.textContent = `Claim +${wallet.prices.dailyStipend}`;
+    const lw = $("ladder-wallet");
+    lw.hidden = !wallet?.exists;
+    lw.textContent = `🪙 ${coin(bal)}`;
+    const cost = submitCost();
+    submitBtnEl.innerHTML = `Submit to ladder${wallet ? (cost ? `<span class="cost-badge">${cost} 🪙</span>` : `<span class="free-badge">free</span>`) : ""}`;
+    submitBtnEl.title = cost
+      ? `Costs ${cost} botcoin (extra bots, and extra versions on the same day, cost coins)`
+      : "Free: your first bot, or this bot's first version today";
+    renderWalletPop();
+  }
+  function renderWalletPop(): void {
+    const pop = $("wallet-pop");
+    if (!wallet || !wallet.exists) {
+      pop.innerHTML = `<h4>🪙 Botcoin</h4>
+        <p>Submit your first bot to the ladder (it's <strong>free</strong>) and get <span class="big">100</span> botcoin.</p>
+        <ul><li>Claim +20 every day, and earn a little when your bot wins (+0.1) or draws (+0.01).</li>
+        <li>Spend them to <strong>boost</strong> your bot (priority games) or <strong>bet</strong> on its next games.</li>
+        <li>Extra bots and extra versions on the same day cost coins.</li></ul>`;
+      return;
+    }
+    const p = wallet.prices;
+    const ledger = wallet.ledger;
+    const bets = wallet.bets.slice(0, 8);
+    pop.innerHTML = `<h4>🪙 Botcoin</h4>
+      <div><span class="big">${coin(wallet.balance)}</span> <span class="muted">botcoin</span></div>
+      <ul>
+        <li><strong>Earn</strong>: +${p.winPayout} per win, +${p.drawPayout} per draw, +${p.dailyStipend} daily${wallet.stipendAvailable ? " <strong>(ready to claim)</strong>" : ""}</li>
+        <li><strong>Boost</strong>: ${p.boostPairCost} for 2 priority games</li>
+        <li><strong>Bet</strong> ${p.betMinStake}–${p.betMaxStake} on your bot's next ${p.betGames.join("/")} games: up to 3× if it beats its rating</li>
+        <li><strong>Submit</strong>: next new bot ${wallet.nextNewBotCost}, 1 free version per bot per day, then ${p.updateCost}</li>
+      </ul>
+      <div class="muted">Boost and bet from your bot's panel in the <strong>Leaderboard</strong>.</div>
+      ${bets.length ? `<div class="pop-section"><strong>Your bets</strong>${bets.map(betLine).join("")}</div>` : ""}
+      ${ledger.length ? `<div class="pop-section"><strong>Recent activity</strong></div>` : ""}
+      ${ledger.length ? `<div class="ledger">${ledger
+        .slice(0, 25)
+        .map((l) => `<div><span>${esc(LEDGER_LABEL[l.kind] ?? l.kind)}${l.ref ? ` · ${esc(l.ref)}` : ""}${l.count && l.count > 1 ? ` ×${l.count}` : ""}</span><span class="${l.delta >= 0 ? "up" : "down"}">${signed(l.delta)}</span></div>`)
+        .join("")}</div>` : ""}`;
+  }
+  /** One bet in the wallet panel: open (progress) or settled (profit/loss). */
+  function betLine(b: PublicBet): string {
+    const what = `${esc(b.botName)} · ${b.stake} 🪙 on ${b.games}`;
+    if (!b.settledAt) {
+      return `<div class="bet-line"><span>🎲 ${what}</span><span class="muted">${b.played}/${b.games} · ${b.actual} vs ${b.expected} exp.</span></div>`;
+    }
+    if (b.outcome === "refunded") return `<div class="bet-line"><span>${what}</span><span class="muted">refunded</span></div>`;
+    const net = (b.payout ?? 0) - b.stake;
+    return `<div class="bet-line"><span>${net >= 0 ? "✅" : "❌"} ${what}</span><span class="${net >= 0 ? "up" : "down"}">${net >= 0 ? "+" : ""}${net} (${b.actual}/${b.games} vs ${b.expected})</span></div>`;
+  }
+  /** Bets seen open last time: when one settles, say so. */
+  let openBetIds: Set<string> | null = null;
+  function announceSettled(): void {
+    if (!wallet?.exists) return;
+    const nowOpen = new Set(wallet.bets.filter((b) => !b.settledAt).map((b) => b.id));
+    if (openBetIds) {
+      for (const b of wallet.bets) {
+        if (!openBetIds.has(b.id) || !b.settledAt || b.outcome !== "settled") continue;
+        const net = (b.payout ?? 0) - b.stake;
+        hooks.status(
+          `🎲 Bet settled: ${b.botName} scored ${b.actual} vs ${b.expected} expected over ${b.games} games. Payout ${b.payout} 🪙 (${net >= 0 ? "+" : ""}${net}).`,
+          net >= 0 ? "ok" : "err",
+        );
+      }
+    }
+    openBetIds = nowOpen;
+  }
+
+  $("wallet-chip").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const pop = $("wallet-pop");
+    pop.hidden = !pop.hidden;
+    $("wallet-chip").setAttribute("aria-expanded", String(!pop.hidden));
+    if (!pop.hidden) void loadWallet();
+  });
+  document.addEventListener("click", (e) => {
+    const pop = $("wallet-pop");
+    if (!pop.hidden && !(e.target as HTMLElement).closest(".wallet-wrap")) {
+      pop.hidden = true;
+      $("wallet-chip").setAttribute("aria-expanded", "false");
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") $("wallet-pop").hidden = true;
+  });
+  // Keep the balance live so win payouts show up as they happen.
+  window.setInterval(() => {
+    if (!document.hidden) void loadWallet();
+  }, 15_000);
+  $("stipend-btn").addEventListener("click", async () => {
+    try {
+      wallet = await postJSON<WalletView>("/api/wallet/stipend", { owner: owner() });
+      renderWallet();
+      hooks.status(`Claimed today's botcoin: you have 🪙 ${coin(wallet.balance)}.`, "ok");
+    } catch (e) {
+      hooks.status(`Could not claim: ${e instanceof Error ? e.message : String(e)}`, "err");
+    }
+  });
+
   const nameInput = $<HTMLInputElement>("ladder-name");
+  nameInput.addEventListener("input", renderWallet);
+  void loadWallet();
   if (me) nameInput.value = me.name;
   $("ladder-controls").hidden = false;
   $("leaderboard-btn").hidden = false;
@@ -178,6 +366,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
         saveIdentity(me);
       }
       if (body.id) mineIds.add(body.id);
+      void loadWallet();
       hooks.status(`Submitted ${body.name} v${body.version}. ${body.placementGames ?? "Placement"} placement games are queued; open the Leaderboard to follow along.`, "ok");
     } catch (e) {
       hooks.status(`Ladder submission failed: ${e instanceof Error ? e.message : String(e)}`, "err");
@@ -250,12 +439,16 @@ export async function initLadder(hooks: Hooks): Promise<void> {
         season ? Promise.resolve({ queue: 0, busy: false }) : getJSON<{ queue: number; busy: boolean }>("/api/health"),
       ]);
       if (shown !== season) return; // switched seasons while loading
+      if (!season) void loadWallet();
       $("ladder-meta").textContent =
         `${rows.length} bots` + (top ? ` · top score ${top.score} by ${top.name}` : "") + (health.busy || health.queue ? ` · ${health.queue + (health.busy ? 1 : 0)} games in queue` : "");
       $("ladder-rows").innerHTML = rows
         .map((r) => {
           const mine = isMine(r.id);
-          const tags = [mine ? `<span class="tag you">you</span>` : "", r.house ? `<span class="tag">house</span>` : "", r.provisional ? `<span class="tag" title="Fewer than 10 games since the last version">provisional</span>` : ""].join("");
+          const tags = [
+            mine ? `<span class="tag you">you</span>` : "",
+            r.boosted ? `<span class="tag boost" title="${r.boosted} boost pair(s) queued">⚡${r.boosted}</span>` : "",
+            r.openBet ? `<span class="tag bet" title="Open bet: ${r.openBet.stake} 🪙 on the next ${r.openBet.games} games">🎲 ${r.openBet.played}/${r.openBet.games}</span>` : "", r.house ? `<span class="tag">house</span>` : "", r.provisional ? `<span class="tag" title="Fewer than 10 games since the last version">provisional</span>` : ""].join("");
           return `<tr data-id="${esc(r.id)}" class="${mine ? "mine" : ""} ${r.id === selected ? "selected" : ""}">
             <td>${r.rank}</td><td>${esc(r.name)}${r.version > 1 ? ` <span class="muted">v${r.version}</span>` : ""}${tags}</td>
             <td><strong>${r.elo}</strong></td><td>${r.wins}-${r.losses}-${r.draws}</td><td>${r.games}</td><td>${r.highScore ?? "–"}</td></tr>`;
@@ -273,12 +466,13 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     const ms = await getJSON<Match[]>(`${api()}/bots/${encodeURIComponent(botId)}/matches?limit=20`);
     // Your own live bot: offer an (inline, two-step) delete.
     const del = !season && isMine(botId) ? `<span class="bot-delete" data-id="${esc(botId)}" data-name="${esc(name)}"><button class="btn ghost small danger" data-del="ask">Delete bot</button></span>` : "";
+    const coins = !season && isMine(botId) ? coinPanel(botId) : "";
     if (!ms.length) {
-      box.innerHTML = `<h4>${esc(name)}: recent matches${del}</h4><div class="muted">No games yet.</div>`;
+      box.innerHTML = `<h4>${esc(name)}: recent matches${del}</h4>${coins}<div class="muted">No games yet.</div>`;
       return;
     }
     box.innerHTML =
-      `<h4>${esc(name)}: recent matches <span class="muted">(click to watch)</span>${del}</h4>` +
+      `<h4>${esc(name)}: recent matches <span class="muted">(click to watch)</span>${del}</h4>${coins}` +
       ms
         .map((m) => {
           const side = m.p1.id === botId ? 1 : 2;
@@ -292,6 +486,75 @@ export async function initLadder(hooks: Hooks): Promise<void> {
             <span class="delta ${d >= 0 ? "up" : "down"}">${d >= 0 ? "+" : ""}${d}</span></div>`;
         })
         .join("");
+  }
+
+  /** Boost and bet controls for one of your own bots. */
+  function coinPanel(botId: string): string {
+    if (!wallet?.exists) return "";
+    const p = wallet.prices;
+    const open = wallet.bets.find((b) => b.botId === botId && !b.settledAt);
+    const last = wallet.bets.find((b) => b.botId === botId && b.settledAt);
+    const opts = (xs: number[], f: (x: number) => string) => xs.map((x) => `<option value="${x}">${f(x)}</option>`).join("");
+    const bet = open
+      ? `<span class="group">🎲 ${open.stake} 🪙 on ${open.games} games: ${open.played} played, ${open.actual} scored vs ${open.expected} expected</span>`
+      : `<span class="group">🎲 Bet <input data-coin="stake" type="number" min="${p.betMinStake}" max="${p.betMaxStake}" value="${Math.max(p.betMinStake, Math.min(20, Math.floor(wallet.balance)))}" />
+          🪙 on the next <select data-coin="games">${opts(p.betGames, (g) => `${g} games`)}</select>
+          <button class="btn small" data-coin="bet" data-id="${esc(botId)}" title="Payout = stake × (score ÷ Elo-expected score), up to 3×">Bet</button></span>`;
+    const result = last && !open ? `<span class="muted">Last bet: ${last.stake} → ${last.payout} 🪙${last.outcome === "refunded" ? " (refunded)" : ""}</span>` : "";
+    return `<div class="coin-panel"><span class="coin-title">🪙 Botcoin</span>
+      <span class="group">⚡ Boost <select data-coin="pairs">${opts([1, 2, 3, 4, 5], (n) => `${n * 2} games · ${n * p.boostPairCost} 🪙`)}</select>
+        <button class="btn small" data-coin="boost" data-id="${esc(botId)}" title="Priority games now, ahead of background games (max ${p.maxBoostPairsQueued} pairs queued)">Boost</button></span>
+      ${bet}${result}<span class="bal">🪙 ${coin(wallet.balance)}</span></div>`;
+  }
+
+  async function coinAction(btn: HTMLButtonElement): Promise<void> {
+    const panel = btn.closest<HTMLElement>(".coin-panel")!;
+    const id = btn.dataset.id!;
+    const val = (k: string) => Number(panel.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-coin="${k}"]`)?.value);
+    const name = $("ladder-rows").querySelector<HTMLElement>(`tr[data-id="${CSS.escape(id)}"]`)?.children[1]?.firstChild?.textContent ?? "";
+    btn.disabled = true;
+    try {
+      if (btn.dataset.coin === "boost") {
+        const r = await postJSON<{ queuedGames: number; balance: number }>(`/api/bots/${encodeURIComponent(id)}/boost`, { owner: owner(), pairs: val("pairs") });
+        hooks.status(`Boosted ${name}: ${r.queuedGames} priority games queued. 🪙 ${coin(r.balance)} left.`, "ok");
+      } else {
+        const r = await postJSON<{ bet: PublicBet; balance: number }>(`/api/bots/${encodeURIComponent(id)}/bet`, { owner: owner(), stake: val("stake"), games: val("games") });
+        hooks.status(`Bet ${r.bet.stake} 🪙 on ${name}'s next ${r.bet.games} games. 🪙 ${coin(r.balance)} left.`, "ok");
+      }
+      await loadWallet();
+      await refresh();
+      await showMatches(id, name);
+    } catch (e) {
+      hooks.status(`${btn.dataset.coin === "boost" ? "Boost" : "Bet"} failed: ${e instanceof Error ? e.message : String(e)}`, "err");
+      btn.disabled = false;
+    }
+  }
+
+  async function showBets(): Promise<void> {
+    const box = $("ladder-matches");
+    box.hidden = false;
+    selected = null;
+    for (const x of document.querySelectorAll("#ladder-rows tr")) x.classList.remove("selected");
+    try {
+      const bets = await getJSON<PublicBet[]>("/api/bets?limit=50");
+      box.innerHTML =
+        `<h4>Recent bets <span class="muted">(payout = stake × score ÷ Elo-expected, up to 3×)</span></h4>` +
+        (bets.length
+          ? bets
+              .map((b) => {
+                const state = !b.settledAt
+                  ? `<span class="muted">${b.played}/${b.games} played</span>`
+                  : b.outcome === "refunded"
+                    ? `<span class="muted">refunded</span>`
+                    : `<span class="${b.payout! >= b.stake ? "up" : ""}">→ ${b.payout} 🪙</span>`;
+                return `<div class="bet-row"><span><strong>${esc(b.botName)}</strong> <span class="muted">· ${b.games} games · ${b.actual} vs ${b.expected} expected · ${fmtDate(b.placedAt)}</span></span>
+                  <span>${b.stake} 🪙</span>${state}</div>`;
+              })
+              .join("")
+          : `<div class="muted">No bets yet.</div>`);
+    } catch (e) {
+      box.innerHTML = `<div class="muted">Could not load bets: ${esc(e instanceof Error ? e.message : String(e))}</div>`;
+    }
   }
 
   /** Inline confirm: "Delete bot" → "Really delete X? …" [Confirm] [Cancel]. */
@@ -350,6 +613,8 @@ export async function initLadder(hooks: Hooks): Promise<void> {
   $("ladder-matches").addEventListener("click", async (e) => {
     const delBtn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-del]");
     if (delBtn) return void deleteStep(delBtn);
+    const coinBtn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-coin]");
+    if (coinBtn) return void coinAction(coinBtn);
     const row = (e.target as HTMLElement).closest<HTMLElement>("[data-match]");
     if (!row) return;
     try {
@@ -371,6 +636,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     timer = window.setInterval(() => void (season ? undefined : refresh()), 10_000);
   });
   $("ladder-refresh").addEventListener("click", () => void refresh(true));
+  $("bets-btn").addEventListener("click", () => void showBets());
   $("close-ladder").addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (e) => {
     if (e.target === dialog) dialog.close();

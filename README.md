@@ -1,34 +1,15 @@
 # Bot Arena
 
-Programmable 1v1 strategy game: write a bot (`onTick(state, memory) → actions`), fight other bots.
+Bot Arena is a programmable 1v1 strategy game. You write a bot, a single function
+`onTick(state, memory) → actions`, and it fights other bots on a fog-of-war map: harvesting resources,
+spawning units, building structures and trying to destroy the enemy's bases.
 
-- **RULES.md**: the full rules (source of truth, mirrors `engine/src/config.ts`)
-- **BOT_API.md**: self-contained guide for writing a bot (also meant to be handed to an LLM)
+Two documents cover the game itself:
 
-## Units and structures at a glance
+- **[RULES.md](RULES.md)**: the full rules. It is the source of truth and mirrors `engine/src/config.ts`.
+- **[BOT_API.md](BOT_API.md)**: a self-contained guide to writing a bot, also meant to be handed to an LLM.
 
-| | Cost | HP | Speed | Vision | Notes |
-|---|---|---|---|---|---|
-| Worker | 50 E | 10 | 1 | 5 | carries 20, harvests 5/tick, builds; can't attack |
-| Fighter | 60 E + 15 C | 30 | 1 | 5 | attacks for 6 (9 with Weapons), range 1 |
-| Scout | 30 E | 5 | 2 (4 with Scout Speed) | 9 | attacks for 1, range 1; can't carry |
-| Turret | 100 E | 50 | – | 4 | auto-shoots the lowest-HP enemy unit within 4 for 4; must be built within Chebyshev 8 of any living friendly base |
-| Wall | 5 E | 60 | – | – | blocks movement |
-| Base | 100 E | 200 | – | 7 | workers deposit resources here; supports spawning and nearby turrets; immune to zone damage |
-
-**Scout Speed** is a one-time upgrade costing 15 crystals. It doubles movement speed
-for all your current and future scouts from 2 to 4 tiles per tick, effective immediately.
-Buy it with `{ type: "upgrade", upgrade: "scoutSpeed" }`.
-
-**Additional bases**: a worker builds on an adjacent empty floor tile with
-`{ type: "build", unitId, structure: "base", x, y }`. Workers can deposit at any living
-friendly base into the shared resource balance, and turrets can be built within 8 tiles
-of any living friendly base. A player loses to base destruction only after losing **all bases**.
-Bots receive `myBases` (all living friendly bases); `myBase` defaults to the oldest survivor.
-Use `{ type: "spawn", unit: "worker", baseId }` to choose a base; the limit remains
-one spawn per player per tick. Scoring counts the total HP of surviving friendly bases.
-
-See RULES.md for everything else.
+## Quick start
 
 ```sh
 pnpm install
@@ -39,24 +20,77 @@ pnpm arena verify replays/r.json              # re-simulate and compare final st
 pnpm arena view replays/r.json                # open a replay in the web viewer
 pnpm arena playground                         # browser playground: editor + viewer (built once, served locally)
 pnpm playground                               # same, via the Vite dev server (hot reload)
+pnpm arena server                             # ranked ladder (see below)
 ```
 
-**Playground**: write a bot in the editor on the right (Ctrl/Cmd+Enter runs it), pick an opponent and
-a seed, and watch the match on the left. "Run ×10" plays 5 seeds × both sides and shows your first loss.
-"README · Bot API" shows BOT_API.md with a copy button so you can hand it to an LLM. Your code is
-saved in the browser.
+## The game at a glance
 
-**Two sandboxes, one protocol**: official runs (CLI) use isolated-vm. The playground runs bots in Web
-Workers for local testing. Same API and limits, but timing is wall-clock and the heap isn't capped.
+Each player starts with a base, some energy and a couple of workers. Workers harvest energy and
+crystal and deposit them into a shared balance, which pays for units, structures and upgrades.
+Destroy all enemy bases to win. RULES.md has everything else: map generation, match end and scoring,
+the shrinking zone, fog of war and the exact tick resolution order.
+
+### Units and structures
+
+| | Cost | HP | Speed | Vision | Notes |
+|---|---|---|---|---|---|
+| Worker | 50 E | 10 | 1 | 5 | carries 20, harvests 5/tick, builds; can't attack |
+| Fighter | 60 E + 15 C | 30 | 1 | 5 | attacks for 6 (9 with Weapons), range 1 |
+| Scout | 30 E | 5 | 2 (4 with Scout Speed) | 9 | attacks for 1, range 1; can't carry |
+| Turret | 100 E | 50 | – | 4 | auto-shoots the lowest-HP enemy unit within 4 for 4; must be built within Chebyshev 8 of any living friendly base |
+| Wall | 5 E | 60 | – | – | blocks movement |
+| Base | 100 E + 50 C | 200 | – | 7 | workers deposit resources here; supports spawning and nearby turrets; immune to zone damage |
+
+E = energy, C = crystal. A build or spawn needs the full cost in both resources.
+
+### Upgrades
+
+Upgrades are one-time purchases paid in crystal, for example `{ type: "upgrade", upgrade: "scoutSpeed" }`.
+Each applies immediately to all your current and future eligible units.
+
+| Upgrade | Cost | Effect |
+|---|---|---|
+| `cargo` | 30 C | worker capacity 20 → 30 |
+| `armor` | 40 C | your units take 2 less damage from attacks (minimum 1) |
+| `weapons` | 40 C | fighters deal 9 damage instead of 6 |
+| `scoutSpeed` | 15 C | scouts move 4 tiles per tick instead of 2 |
+
+### Multiple bases
+
+A worker builds an additional base on an adjacent empty floor tile with
+`{ type: "build", unitId, structure: "base", x, y }`; it costs 100 energy and 50 crystals.
+
+- Workers can deposit at any living friendly base into the shared resource balance.
+- Turrets can be built within 8 tiles of any living friendly base.
+- A player loses to base destruction only after losing **all** bases.
+- Bots receive `myBases` (all living friendly bases); `myBase` defaults to the oldest survivor.
+- `{ type: "spawn", unit: "worker", baseId }` chooses where to spawn. The limit stays one spawn per
+  player per tick, however many bases you have.
+- Scoring counts the total HP of surviving friendly bases.
+
+## Playground
+
+`pnpm arena playground` (or `pnpm playground` for hot reload) opens the browser playground. Write a
+bot in the editor on the right (Ctrl/Cmd+Enter runs it), pick an opponent and a seed, and watch the
+match on the left.
+
+- **Run ×10** plays 5 seeds × both sides and shows your first loss.
+- **README · Bot API** shows BOT_API.md with a copy button so you can hand it to an LLM.
+- Your code is saved in the browser.
+
+## Sandboxing
+
+Bots run sandboxed by default, with 64 MB of heap and 50 ms of CPU per tick (see RULES.md §4a).
+`--unsafe` runs them in-process, which is faster but only for code you trust.
+
+There are two sandboxes that share one protocol:
+
+- **Official runs** (the CLI and the ladder server) use isolated-vm. Node ≥ 20 needs
+  `--no-node-snapshot` for isolated-vm; `pnpm arena` and `cli/bin/arena.js` pass it for you.
+- **The playground** runs bots in Web Workers for local testing. The API and limits are the same, but
+  timing is wall-clock and the heap isn't capped.
+
 Both produce identical matches for the same bots and seed.
-
-Layout: `engine/` (pure deterministic simulation), `sandbox/` (isolated-vm bot runner), `viewer/` (web
-playground + replay viewer), `server/` (ranked ladder), `cli/`,
-`bots/` (samples + `lib/helpers.js`, `lib/api.d.ts`).
-
-Bots run sandboxed by default (64 MB, 50 ms CPU/tick; see RULES.md §4a). `--unsafe` runs them
-in-process, which is faster but only for code you trust. Node ≥ 20 needs `--no-node-snapshot` for isolated-vm;
-`pnpm arena` and `cli/bin/arena.js` pass it for you.
 
 ## Ranked ladder
 
@@ -65,31 +99,42 @@ pnpm arena server                       # http://127.0.0.1:8787 — playground +
 pnpm arena server --port 9000 --data ./data --host 0.0.0.0 --no-autoplay --concurrency 4
 ```
 
-The server hosts the playground. When it detects the ladder API, the playground adds **Submit to
-ladder** (name + your editor code) and a **Leaderboard** button. The leaderboard shows rank, Elo, W-L-D,
-games and high score; click a bot for its recent matches (with Elo changes), and click a match to watch the
-replay. Your bot's update token is kept in browser storage. `pnpm playground` (Vite dev) proxies
-`/api` to a ladder on :8787 if one is running.
+The server hosts the playground. When it detects the ladder API, the playground shows a **Submit to
+ladder** button (name + your editor code) and a **Leaderboard** button. The leaderboard shows rank, Elo,
+W-L-D, games and high score; click a bot for its recent matches (with Elo changes), and click a match to
+watch the replay. Your bot's update token is kept in browser storage. `pnpm playground` (Vite dev)
+proxies `/api` to a ladder on :8787 if one is running.
 
 All ladder games run server-side in the isolated-vm sandbox, 8 at a time by default (`--concurrency N`).
 
 - **Elo**: everyone starts at 1200. Expected score is `1/(1+10^((Rb−Ra)/400))`, a draw counts 0.5, and
-  ratings update after every game. K = 40 while a bot is *provisional* (fewer than 10 games since its last
-  submitted version), otherwise 24. Each side uses its own K.
+  ratings update after every game. K = 40 while a bot is *provisional* (fewer than 10 games since its
+  last submitted version), otherwise 24. Each side uses its own K.
 - **High score**: each bot's best single-game score (with the match id), plus the best on the whole
   ladder (`/api/highscore`).
-- **Matchmaking**: a new or updated bot gets placement games against *every* other bot, both sides,
-  one seed per pair, in random order, ahead of any background games. When the queue is empty, a
-  background pair is sampled at random: the first bot is weighted toward those with the fewest games in
-  the last 60 matches, and its opponent is drawn from the whole ladder, weighted away from pairings
-  played recently. There's a 500 ms pause between games. Seeds
-  come from a counter persisted in the data dir, so every game is reproducible from its replay.
+- **Matchmaking**: a bot that is submitted or updated gets placement games against *every* other bot,
+  both sides, one seed per pair, in random order, ahead of any background games. Boost games (see
+  Botcoin) come next. When the queue is
+  empty, a background pair is sampled at random: the first bot is weighted toward those with the fewest
+  games in the last 60 matches, and its opponent is drawn from the whole ladder, weighted away from
+  pairings played recently. There's a 500 ms pause between games. Seeds come from a counter persisted
+  in the data dir, so every game is reproducible from its replay.
 - **House bots**: idle, greedy, rusher, balanced, aggressor and starter are loaded from `bots/` at
-  startup and rated like everyone else. Their names are reserved.
-- **Submissions**: names are 2–24 characters `[A-Za-z0-9_-]` (case-insensitive unique), code is at most
-  100 KB and must initialize in the sandbox. A new name returns a secret `token`; only its sha256 is
-  stored. Re-submitting a name requires that token. It bumps the version, keeps the rating and history,
-  and makes the bot provisional again. Each IP gets 10 submissions per 10 minutes.
+  startup and rated like everyone else. Their names are reserved while they're on the ladder.
+  `arena server --house-bots none` (or a comma list such as `--house-bots rusher,balanced`) loads
+  fewer of them. The live server runs with `none`.
+- **Seasons**: `arena new-season --data ./data [--min-elo 1200]` (with the server stopped) archives the data dir as `data-backup-YYYYMMDD-HHMMSS` (served
+  read-only under past seasons) and starts the ladder over: every bot that carries over goes back to
+  1200 Elo with no games, and the match history and replays are cleared. With `--min-elo N`, bots that
+  finished below N (as shown, rounded) are left behind; they stay in the archive. Bot code and tokens are kept.
+- **Submissions**: names are 2–24 characters `[A-Za-z0-9_-]` (case-insensitive unique), and code is at
+  most 100 KB and must initialize in the sandbox. A new bot needs an owner key, and some submissions
+  cost botcoin (see below). Submitting an unused name returns a secret `token`;
+  only its sha256 is stored. Re-submitting a name requires that token. It bumps the version, keeps the
+  rating and history, and makes the bot provisional again. Each IP gets 10 submissions per 10 minutes.
+- **Owner key**: `owner` is a random hex key (32–128 chars) the browser generates once and keeps in
+  localStorage. The server stores only its sha256 on each bot it submits or claims, and it lets that
+  browser update or delete all of those bots without their individual tokens.
 - **Deleting**: the owner can delete a bot with its token (the leaderboard shows a **Delete bot** button
   on your own bot's match panel). The bot, its code and its queued games are removed and its name is
   freed; a game it is playing at that moment is discarded. Past matches and replays stay, so opponents'
@@ -98,17 +143,69 @@ All ladder games run server-side in the isolated-vm sandbox, 8 at a time by defa
   atomically via temp file + rename), `bots/<id>.js` (current code), `replays/<matchId>.json` (pruned
   together with the match index).
 
+### Botcoin
+
+Botcoin is play money that belongs to an owner key (one wallet per browser). It never affects the game itself;
+bots don't see it.
+
+| | |
+|---|---|
+| Starting grant | 100, when the owner's first bot is accepted (a wallet opens then) |
+| Daily stipend | 20, claimable once per UTC day (**+20 daily** next to the balance) |
+| Rated games | +0.1 per win, +0.01 per draw, to the bot owner's wallet (balances are kept to the cent) |
+| New bot | the owner's first bot is free; each further bot costs 30 |
+| New version | one free version per bot per UTC day, then 5 each |
+| Boost | 5 per pair: two priority games (both sides, one seed) against an opponent picked like a background game, queued after placement and ahead of background games. Up to 10 pairs queued per bot. |
+| Bet | stake 5–500 on a bot's next 4, 10 or 20 rated games; one open bet per bot |
+
+A submission is charged only after its code passes the sandbox check. Without enough coins it gets a `402`.
+Deleting a bot refunds nothing, except its open bet.
+
+**Bet payout** = `round(stake × clamp(actual / expected, 0, 3))`.
+- `actual` is the bot's score over the counted games (win 1, draw 0.5).
+- `expected` is the sum of its Elo expected scores going into each game.
+- A bot that plays exactly to its rating gets its stake back. A bot that beats its rating, such as a stronger
+  version whose provisional rating hasn't caught up yet, pays out up to 3×.
+- Every rated game counts toward the bet, including placement and boost games, so boosting settles a bet faster.
+
+Win payouts are small (0.1 per win), so the daily stipend is most of everyone's income and a strong bot can't
+farm its way to unlimited boosts. A boost costs 2.5 per game, far more than any bot earns from a game.
+
+The playground shows the balance next to **Submit to ladder**, and the button shows the price when a
+submission isn't free. On the leaderboard, your own bot's panel has **Boost** and **Bet** controls,
+⚡ and 🎲 tags mark boosted bots and open bets, and **Bets** lists recent bets.
+
+Wallets live in `ladder.json`.
+- Owners whose bots predate a wallet get one, with the grant, at server start.
+- Wallets carry into a new season, and open bets are refunded (`arena new-season` does both).
+
+### API
+
 | API | |
 |---|---|
-| `GET /api/health` | `{ok, queue, busy}` |
-| `POST /api/bots` | `{name, code, token?, owner?}` → `201 {id, name, version, token}` (new) / `200 {id, name, version}` (update) / `400` invalid / `403` name taken or house / `429` rate limited |
+| `GET /api/health` | `{ok, queue, busy, boostQueue}` |
+| `POST /api/bots` | `{name, code, token?, owner?}` → `201 {id, name, version, token, placementGames, cost, balance}` (first submission; `owner` required) / `200 {id, name, version, placementGames, cost, balance}` (update) / `400` invalid / `402 {error, cost, balance}` not enough botcoin / `403` name taken or house / `429` rate limited |
 | `DELETE /api/bots/:id` | `{token?, owner?}` → `200 {deleted: id}` / `403` neither the bot's token nor its owner key, or house bot / `404` no such bot |
 | `POST /api/mine` | `{owner, claims?: [{id, token}]}` → `{ids}`: bots owned by this owner key. A claim whose token matches links that bot to the key. |
 | `GET /api/seasons` | past seasons (the `data-backup-*` folders next to the data dir): `[{id, number, endedAt, firstMatchAt, lastMatchAt, bots, matches, champion}]` |
 | `GET /api/seasons/:id/{leaderboard,highscore,bots/:bot/matches,matches/:m/replay}` | the same read-only views for an archived season |
-| `GET /api/leaderboard` | `[{rank, id, name, elo, games, wins, losses, draws, highScore, highScoreMatch, version, provisional, house, lastPlayedAt}]` by Elo |
+| `GET /api/leaderboard` | `[{rank, id, name, elo, games, wins, losses, draws, highScore, highScoreMatch, version, provisional, house, lastPlayedAt, boosted, openBet}]` by Elo. `boosted` = queued boost pairs; `openBet` = `{stake, games, played}` or `null` |
 | `GET /api/highscore` | `{botId, name, score, matchId}` or `null` |
 | `GET /api/bots/:id/matches?limit=20` | `[{id, at, seed, p1:{id,name,version,eloBefore,eloAfter,score}, p2, winner, reason, tick}]`, newest first |
 | `GET /api/matches/:id/replay` | replay JSON (`arena verify` / the viewer accept it) |
+| `POST /api/wallet` | `{owner}` → `{exists, balance, stipendAvailable, ledger, nextNewBotCost, bots: [{id, name, nextUpdateCost}], bets, prices}` (read-only) |
+| `POST /api/wallet/stipend` | `{owner}` → the wallet / `404` no wallet yet / `409` already claimed today |
+| `POST /api/bots/:id/boost` | `{owner, pairs}` → `{balance, queuedGames, boosted}` / `402` not enough botcoin / `403` not yours or house / `409` more than 10 pairs queued |
+| `POST /api/bots/:id/bet` | `{owner, stake, games}` → `{bet, balance}` / `400` bad stake or games / `402` / `403` / `409` an open bet already |
+| `GET /api/bets?limit=50` | recent and open bets, newest first: `[{id, botId, botName, stake, games, played, actual, expected, placedAt, settledAt, payout, outcome}]` |
 
-`owner` is a random hex key (32–128 chars) the browser generates once and keeps in localStorage. The server stores only its sha256 on each bot it submits or claims, and it lets that browser update or delete all of those bots without their individual tokens.
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `engine/` | pure deterministic simulation; `src/config.ts` holds every game constant |
+| `sandbox/` | isolated-vm bot runner |
+| `viewer/` | web playground + replay viewer |
+| `server/` | ranked ladder |
+| `cli/` | the `arena` command |
+| `bots/` | sample bots + `lib/helpers.js`, `lib/api.d.ts` |

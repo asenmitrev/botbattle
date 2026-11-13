@@ -1,7 +1,7 @@
 // Single source of game constants. RULES.md must stay in sync with this file.
 // Bump CONFIG_VERSION whenever any value below changes (replays record it).
 
-export const CONFIG_VERSION = "1.8.0";
+export const CONFIG_VERSION = "1.9.0";
 
 export const CONFIG = {
   map: {
@@ -32,7 +32,7 @@ export const CONFIG = {
     unitCap: 40,
   },
 
-  base: { costEnergy: 100, hp: 200, vision: 7, maxDistFromBase: Infinity },
+  base: { costEnergy: 100, costCrystal: 50, hp: 200, vision: 7, maxDistFromBase: Infinity },
 
   units: {
     worker: { costEnergy: 50, costCrystal: 0, hp: 10, speed: 1, vision: 5, carry: 20, harvest: 5, damage: 0, range: 0 },
@@ -41,8 +41,8 @@ export const CONFIG = {
   },
 
   structures: {
-    turret: { costEnergy: 100, hp: 50, damage: 4, range: 4, vision: 4, maxDistFromBase: 8 },
-    wall: { costEnergy: 5, hp: 60, damage: 0, range: 0, vision: 0, maxDistFromBase: Infinity },
+    turret: { costEnergy: 100, costCrystal: 0, hp: 50, damage: 4, range: 4, vision: 4, maxDistFromBase: 8 },
+    wall: { costEnergy: 5, costCrystal: 0, hp: 60, damage: 0, range: 0, vision: 0, maxDistFromBase: Infinity },
   },
 
   nodes: {

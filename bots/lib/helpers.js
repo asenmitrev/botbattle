@@ -8,7 +8,7 @@ export const COSTS = {
   scout: { energy: 30, crystal: 0 },
   turret: { energy: 100, crystal: 0 },
   wall: { energy: 5, crystal: 0 },
-  base: { energy: 100, crystal: 0 },
+  base: { energy: 100, crystal: 50 },
   cargo: { energy: 0, crystal: 30 },
   armor: { energy: 0, crystal: 40 },
   weapons: { energy: 0, crystal: 40 },

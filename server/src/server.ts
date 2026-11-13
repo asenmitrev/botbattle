@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { IsolatedBot } from "@arena/sandbox";
+import { ECON, EconomyError } from "./economy.js";
 import { Ladder, MAX_CODE_BYTES, NAME_RE, OWNER_RE, SubmitError } from "./ladder.js";
 import { MatchPool } from "./match-runner.js";
 import { Scheduler, type SchedulerOptions } from "./scheduler.js";
@@ -67,6 +68,8 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
   const pool = concurrency > 1 ? new MatchPool(concurrency) : null;
   if (pool) ladder.runner = pool.run;
   for (const name of opts.houseBots ?? HOUSE_BOTS) ladder.registerHouseBot(name, path.join(REPO, "bots", `${name}.js`));
+  const opened = ladder.openLegacyWallets();
+  if (opened) log(`botcoin: opened ${opened} wallet(s) for existing owners`);
   const scheduler = new Scheduler(ladder, {
     ...opts.scheduler,
     onError: opts.scheduler?.onError ?? ((e, job) => log(`match ${job.p1} vs ${job.p2} failed: ${e instanceof Error ? e.message : String(e)}`)),
@@ -108,8 +111,18 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     const url = new URL(req.url ?? "/", "http://localhost");
     const p = url.pathname;
     if (p.startsWith("/api/")) {
-      if (req.method === "GET" && p === "/api/health") return json(res, 200, { ok: true, queue: scheduler.queue.length, busy: scheduler.busy });
-      if (req.method === "GET" && p === "/api/leaderboard") return json(res, 200, ladder.leaderboard());
+      if (req.method === "GET" && p === "/api/health") {
+        return json(res, 200, { ok: true, queue: scheduler.queue.length, busy: scheduler.busy, boostQueue: scheduler.queue.filter((j) => j.boostFor).length });
+      }
+      if (req.method === "GET" && p === "/api/leaderboard") {
+        const boosts = scheduler.boostCounts();
+        return json(res, 200, ladder.leaderboard().map((r) => ({ ...r, boosted: boosts.get(r.id) ?? 0 })));
+      }
+      if (req.method === "POST" && p === "/api/wallet") return econ(req, res, (b) => ladder.walletView(str(b.owner)));
+      if (req.method === "POST" && p === "/api/wallet/stipend") return econ(req, res, (b) => ladder.claimStipend(str(b.owner)));
+      if (req.method === "GET" && p === "/api/bets") {
+        return json(res, 200, ladder.recentBets(Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50))));
+      }
       if (req.method === "GET" && p === "/api/highscore") return json(res, 200, ladder.topScore());
       if (req.method === "POST" && p === "/api/bots") return submit(req, res);
       if (req.method === "POST" && p === "/api/mine") return mine(req, res);
@@ -121,6 +134,24 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
       }
       m = /^\/api\/bots\/([A-Za-z0-9_-]+)$/.exec(p);
       if (req.method === "DELETE" && m) return removeBot(req, res, m[1]!);
+      m = /^\/api\/bots\/([A-Za-z0-9_-]+)\/(boost|bet)$/.exec(p);
+      if (req.method === "POST" && m) {
+        const [, id, what] = m;
+        return econ(req, res, (b) => {
+          const cred = { token: optStr(b.token), owner: optStr(b.owner) };
+          if (what === "bet") return ladder.placeBet(id!, cred, Number(b.stake), Number(b.games));
+          const pairs = Number(b.pairs);
+          if (!Number.isInteger(pairs) || pairs < 1) throw new EconomyError(400, "pairs must be a whole number of at least 1");
+          const queued = scheduler.boostQueued(id!);
+          if (queued + pairs > ECON.maxBoostPairsQueued) {
+            throw new EconomyError(409, `at most ${ECON.maxBoostPairsQueued} boost pairs can be queued per bot (${queued} queued)`);
+          }
+          const r = ladder.chargeBoost(id!, cred, pairs);
+          const games = scheduler.enqueueBoost(r.bot.id, pairs);
+          log(`boost ${r.bot.name} ×${pairs}`);
+          return { balance: r.balance, queuedGames: games, boosted: scheduler.boostQueued(r.bot.id) };
+        });
+      }
       m = /^\/api\/bots\/([A-Za-z0-9_-]+)\/code$/.exec(p);
       if (req.method === "GET" && m) {
         const b = ladder.bot(m[1]!);
@@ -169,6 +200,24 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     }
   }
 
+  /** POST JSON body → `fn(body)` → 200 JSON. Ladder/economy errors map to their HTTP status. */
+  async function econ(req: http.IncomingMessage, res: http.ServerResponse, fn: (body: Record<string, unknown>) => unknown): Promise<void> {
+    let body: Record<string, unknown>;
+    try {
+      const raw = await readBody(req, 4 * 1024);
+      body = raw.trim() ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      if (!body || typeof body !== "object") throw new Error("not an object");
+    } catch {
+      return json(res, 400, { error: "body must be a JSON object" });
+    }
+    try {
+      return json(res, 200, fn(body));
+    } catch (e) {
+      if (e instanceof SubmitError || e instanceof EconomyError) return json(res, e.status, { error: e.message });
+      throw e;
+    }
+  }
+
   /** POST /api/mine {owner, claims?: [{id, token}]}: ids of the bots this browser owns (claims link token-only bots to it). */
   async function mine(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     let body: { owner?: unknown; claims?: unknown };
@@ -210,6 +259,11 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     const existing = ladder.byName(name);
     if (existing?.house) return json(res, 403, { error: `"${existing.name}" is a house bot name` });
     if (existing && !ladder.owns(existing, { token, owner })) return json(res, 403, { error: `"${existing.name}" is taken; updating it requires its token` });
+    if (!existing && !owner) return json(res, 400, { error: "a new bot needs an owner key (the browser's botcoin wallet)" });
+    const quote = ladder.quoteSubmit(name, owner);
+    if (quote.cost > quote.balance) {
+      return json(res, 402, { error: `not enough botcoin: ${existing ? "another version today" : "a new bot"} costs ${quote.cost}, you have ${quote.balance}`, cost: quote.cost, balance: quote.balance });
+    }
     const probe = await IsolatedBot.create({ source: code, name });
     const initError = probe.initError;
     probe.dispose();
@@ -224,6 +278,8 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
         version: r.bot.version,
         ...(r.token ? { token: r.token } : {}),
         placementGames,
+        cost: r.cost,
+        balance: r.balance,
       });
     } catch (e) {
       if (e instanceof SubmitError) return json(res, e.status, { error: e.message });
@@ -247,6 +303,9 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     },
   };
 }
+
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const optStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });

@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { BotSource } from "@arena/sandbox";
 import { inProcessRunner, type MatchRun, type MatchRunner } from "./match-runner.js";
 import { ELO, kFactor, updateElo } from "./elo.js";
+import { dayKey, ECON, Economy, emptyEconomy, publicBet } from "./economy.js";
 import type { BotRecord, LadderData, LadderStore, MatchRecord } from "./store.js";
 
 export const NAME_RE = /^[A-Za-z0-9_-]{2,24}$/;
@@ -30,6 +31,8 @@ export interface LeaderboardRow {
   provisional: boolean;
   house: boolean;
   lastPlayedAt: string | null;
+  /** Open botcoin bet on this bot, if any. */
+  openBet: { stake: number; games: number; played: number } | null;
 }
 
 export class SubmitError extends Error {
@@ -48,8 +51,105 @@ export class Ladder {
   /** How matches are played: in-process by default; the server swaps in a worker pool. */
   runner: MatchRunner = inProcessRunner;
 
+  /** Clock for stipends and free daily updates. Injectable for tests. */
+  now: () => Date = () => new Date();
+
+  readonly economy: Economy;
+
   constructor(readonly store: LadderStore) {
     this.data = store.load();
+    this.data.economy ??= emptyEconomy();
+    this.economy = new Economy(this.data.economy, () => this.now());
+  }
+
+  /** Live ladder startup: owners who submitted before botcoin existed get a wallet (with the grant). */
+  openLegacyWallets(): number {
+    let n = 0;
+    for (const b of this.data.bots) if (!b.house && b.ownerHash && this.economy.ensureWallet(b.ownerHash)) n++;
+    if (n) this.save();
+    return n;
+  }
+
+  /**
+   * What submitting `name` would cost, and from which wallet. A new owner's first bot is free (it opens
+   * the wallet); each further bot costs ECON.newBotCost. Each bot gets one free version per UTC day,
+   * then ECON.updateCost. Bots with no owner key on record (legacy token-only) are free.
+   */
+  quoteSubmit(name: string, owner: string | undefined): { cost: number; wallet: string | null; balance: number; freeUpdate: boolean } {
+    const existing = this.byName(name);
+    const h = existing?.ownerHash ?? (owner && OWNER_RE.test(owner) ? sha256(owner) : null);
+    if (!h) return { cost: 0, wallet: null, balance: 0, freeUpdate: false };
+    const w = this.economy.wallet(h);
+    const balance = w?.balance ?? 0;
+    if (existing) {
+      const freeUpdate = existing.lastFreeUpdateDay !== dayKey(this.now());
+      // A legacy owner without a wallet gets one (and the grant) on this submission, so it can pay.
+      return { cost: freeUpdate ? 0 : ECON.updateCost, wallet: h, balance: w ? balance : ECON.startingGrant, freeUpdate };
+    }
+    return { cost: w ? ECON.newBotCost : 0, wallet: h, balance: w ? balance : ECON.startingGrant, freeUpdate: false };
+  }
+
+  private balanceOf(wallet: string | null): number | null {
+    return wallet ? (this.economy.wallet(wallet)?.balance ?? null) : null;
+  }
+
+  /** Ensure the credentials own a user bot that is linked to a wallet; returns the wallet id. */
+  spender(botId: string, cred: Credentials): { bot: BotRecord; wallet: string } {
+    const b = this.bot(botId);
+    if (!b) throw new SubmitError(404, "no such bot");
+    if (b.house) throw new SubmitError(403, `"${b.name}" is a house bot`);
+    if (!this.owns(b, cred)) throw new SubmitError(403, `"${b.name}" isn't yours`);
+    if (!b.ownerHash) throw new SubmitError(403, "this bot isn't linked to a browser wallet yet: open the leaderboard in the browser that owns it");
+    this.economy.ensureWallet(b.ownerHash);
+    return { bot: b, wallet: b.ownerHash };
+  }
+
+  /** Wallet summary for an owner key (read-only; a key with no wallet gets `exists: false`). */
+  walletView(owner: string) {
+    if (!OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
+    const h = sha256(owner);
+    const w = this.economy.wallet(h);
+    const today = dayKey(this.now());
+    const bots = this.data.bots
+      .filter((b) => !b.house && b.ownerHash && safeEqualHex(h, b.ownerHash))
+      .map((b) => ({ id: b.id, name: b.name, nextUpdateCost: b.lastFreeUpdateDay !== today ? 0 : ECON.updateCost }));
+    const botIds = new Set(bots.map((b) => b.id));
+    return {
+      exists: !!w,
+      balance: w?.balance ?? 0,
+      stipendAvailable: this.economy.stipendAvailable(h),
+      ledger: [...(w?.ledger ?? [])].reverse(),
+      nextNewBotCost: w ? ECON.newBotCost : 0,
+      bots,
+      bets: this.data.economy!.bets.filter((b) => b.owner === h || botIds.has(b.botId)).slice(-20).reverse().map(publicBet),
+      prices: ECON,
+    };
+  }
+
+  claimStipend(owner: string) {
+    if (!OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
+    this.economy.claimStipend(sha256(owner));
+    this.save();
+    return this.walletView(owner);
+  }
+
+  placeBet(botId: string, cred: Credentials, stake: number, games: number) {
+    const { bot, wallet } = this.spender(botId, cred);
+    const bet = this.economy.placeBet(wallet, bot.id, bot.name, stake, games);
+    this.save();
+    return { bet: publicBet(bet), balance: this.economy.wallet(wallet)!.balance };
+  }
+
+  /** Charge for `pairs` boost pairs (the caller queues the games). */
+  chargeBoost(botId: string, cred: Credentials, pairs: number): { bot: BotRecord; balance: number } {
+    const { bot, wallet } = this.spender(botId, cred);
+    this.economy.debit(wallet, pairs * ECON.boostPairCost, "boost", bot.name);
+    this.save();
+    return { bot, balance: this.economy.wallet(wallet)!.balance };
+  }
+
+  recentBets(limit: number) {
+    return this.data.economy!.bets.slice(-limit).reverse().map(publicBet);
   }
 
   save(): void {
@@ -98,6 +198,7 @@ export class Ladder {
       const b = this.bot(c.id);
       if (b && !b.house && b.ownerHash !== h && this.owns(b, { token: c.token })) {
         b.ownerHash = h;
+        this.economy.ensureWallet(h);
         changed = true;
       }
     }
@@ -105,32 +206,49 @@ export class Ladder {
     return this.data.bots.filter((b) => !b.house && b.ownerHash && safeEqualHex(h, b.ownerHash)).map((b) => b.id);
   }
 
-  submit(name: string, code: string, cred: string | undefined | Credentials): { bot: BotRecord; token: string | null; created: boolean } {
+  submit(
+    name: string,
+    code: string,
+    cred: string | undefined | Credentials,
+  ): { bot: BotRecord; token: string | null; created: boolean; cost: number; balance: number | null } {
     const { token, owner } = typeof cred === "object" ? cred : { token: cred, owner: undefined };
     if (owner !== undefined && !OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
     if (!NAME_RE.test(name)) throw new SubmitError(400, "name must be 2-24 characters: letters, digits, _ or -");
     if (Buffer.byteLength(code, "utf8") > MAX_CODE_BYTES) throw new SubmitError(400, `code exceeds ${MAX_CODE_BYTES} bytes`);
     const existing = this.byName(name);
     if (existing?.house) throw new SubmitError(403, `"${existing.name}" is a house bot name`);
+    if (existing && !this.owns(existing, { token, owner })) {
+      throw new SubmitError(403, `"${existing.name}" is taken; updating it requires its token`);
+    }
+    // Botcoin: check the price before changing anything, then open the wallet if needed and pay.
+    const quote = this.quoteSubmit(name, owner);
+    if (quote.cost > quote.balance) {
+      throw new SubmitError(402, `not enough botcoin: ${existing ? "another version today" : "a new bot"} costs ${quote.cost}, you have ${quote.balance}`);
+    }
+    const pay = (botName: string) => {
+      if (!quote.wallet) return;
+      this.economy.ensureWallet(quote.wallet);
+      this.economy.debit(quote.wallet, quote.cost, "submit", botName);
+    };
     if (existing) {
-      if (!this.owns(existing, { token, owner })) {
-        throw new SubmitError(403, `"${existing.name}" is taken; updating it requires its token`);
-      }
       if (owner && !existing.ownerHash) existing.ownerHash = sha256(owner);
+      pay(existing.name);
+      if (quote.freeUpdate) existing.lastFreeUpdateDay = dayKey(this.now());
       existing.version++;
       existing.gamesSinceVersion = 0;
       this.store.saveCode(existing.id, code);
       this.save();
-      return { bot: existing, token: null, created: false };
+      return { bot: existing, token: null, created: false, cost: quote.cost, balance: this.balanceOf(quote.wallet) };
     }
     const plain = randomBytes(32).toString("hex");
     const b = newRecord(`b${randomBytes(6).toString("hex")}`, name, false);
     b.tokenHash = sha256(plain);
     if (owner) b.ownerHash = sha256(owner);
+    pay(name);
     this.store.saveCode(b.id, code);
     this.data.bots.push(b);
     this.save();
-    return { bot: b, token: plain, created: true };
+    return { bot: b, token: plain, created: true, cost: quote.cost, balance: this.balanceOf(quote.wallet) };
   }
 
   /**
@@ -146,6 +264,7 @@ export class Ladder {
       throw new SubmitError(403, `deleting "${b.name}" requires its token or owner key`);
     }
     this.data.bots.splice(this.data.bots.indexOf(b), 1);
+    this.economy.refundBets(b.id);
     this.store.deleteCode(b.id);
     this.save();
     return b;
@@ -209,6 +328,7 @@ export class Ladder {
     this.store.saveReplay(id, outcome.replay);
     apply(a, ea, scoreA, res.scores[0], id, at);
     apply(b, eb, 1 - scoreA, res.scores[1], id, at);
+    this.economy.recordGame(rec, { p1: a.house ? null : a.ownerHash ?? null, p2: b.house ? null : b.ownerHash ?? null });
     this.data.matches.push(rec);
     while (this.data.matches.length > this.maxMatches) {
       const old = this.data.matches.shift()!;
@@ -236,6 +356,7 @@ export class Ladder {
         provisional: b.gamesSinceVersion < ELO.provisionalGames,
         house: b.house,
         lastPlayedAt: b.lastPlayedAt,
+        openBet: openBet(this.economy.openBet(b.id)),
       }));
   }
 
@@ -266,6 +387,10 @@ export function publicMatch(m: MatchRecord) {
     score: s.score,
   });
   return { id: m.id, at: m.at, seed: m.seed, p1: side(m.p1), p2: side(m.p2), winner: m.winner, reason: m.reason, tick: m.tick };
+}
+
+function openBet(b: { stake: number; games: number; counted: unknown[] } | undefined): LeaderboardRow["openBet"] {
+  return b ? { stake: b.stake, games: b.games, played: b.counted.length } : null;
 }
 
 function apply(b: BotRecord, elo: number, result: number, score: number, matchId: string, at: string): void {

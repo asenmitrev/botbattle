@@ -7,6 +7,8 @@ import { MatchPool, playMatch, startServer, type MatchSpec, type RunningServer }
 
 const STARTER = fs.readFileSync(path.resolve(__dirname, "../../bots/starter.js"), "utf8");
 let srv: RunningServer;
+/** Browser owner key (botcoin wallet) used for new bots. */
+const OWNER = "c".repeat(64);
 let dir: string;
 
 async function api(method: string, p: string, body?: unknown) {
@@ -46,7 +48,7 @@ describe("ladder API", () => {
   let token = "";
   let id = "";
   it("submitting a valid bot creates it and runs placement games against every other bot", async () => {
-    const r = await api("POST", "/api/bots", { name: "my-bot", code: STARTER });
+    const r = await api("POST", "/api/bots", { name: "my-bot", code: STARTER, owner: OWNER });
     expect(r.status).toBe(201);
     expect(r.body.token).toMatch(/^[0-9a-f]{64}$/);
     expect(r.body.placementGames).toBe(6); // 3 house bots, both sides
@@ -108,17 +110,17 @@ describe("ladder API", () => {
     }
     expect((await api("POST", "/api/bots", { name: "greedy", code: STARTER })).status).toBe(403);
     expect((await api("POST", "/api/bots", { name: "empty", code: "  " })).status).toBe(400);
-    const syntax = await api("POST", "/api/bots", { name: "broken", code: "export function onTick( { return [ ; }" });
+    const syntax = await api("POST", "/api/bots", { name: "broken", owner: OWNER, code: "export function onTick( { return [ ; }" });
     expect(syntax.status).toBe(400);
     expect(syntax.body.error).toMatch(/SyntaxError/);
     const t0 = Date.now();
-    const hang = await api("POST", "/api/bots", { name: "hang", code: "for(;;){} export function onTick(){return []}" });
+    const hang = await api("POST", "/api/bots", { name: "hang", owner: OWNER, code: "for(;;){} export function onTick(){return []}" });
     expect(hang.status).toBe(400);
     expect(hang.body.error).toMatch(/timeout/);
     expect(Date.now() - t0).toBeLessThan(5000);
-    const noTick = await api("POST", "/api/bots", { name: "notick", code: "export const x = 1;" });
+    const noTick = await api("POST", "/api/bots", { name: "notick", owner: OWNER, code: "export const x = 1;" });
     expect(noTick.status).toBe(400);
-    const big = await api("POST", "/api/bots", { name: "big", code: "//" + "x".repeat(110 * 1024) });
+    const big = await api("POST", "/api/bots", { name: "big", owner: OWNER, code: "//" + "x".repeat(110 * 1024) });
     expect(big.status).toBe(400);
     const notJson = await fetch(srv.url + "/api/bots", { method: "POST", body: "nope" });
     expect(notJson.status).toBe(400);
@@ -244,7 +246,7 @@ describe("deleting a bot", () => {
   });
 
   it("only the owner can delete; house bots never; the bot, its code and queued games go, history stays", async () => {
-    const r = await call("POST", "/api/bots", { name: "doomed", code: STARTER });
+    const r = await call("POST", "/api/bots", { name: "doomed", code: STARTER, owner: OWNER });
     expect(r.status).toBe(201);
     const { id, token } = r.body;
     await s.scheduler.whenIdle();
@@ -283,14 +285,14 @@ describe("deleting a bot", () => {
     expect((await call("GET", `/api/matches/${old[0].id}/replay`)).status).toBe(200);
 
     // The name is free again, and matchmaking never picks the deleted bot.
-    const again = await call("POST", "/api/bots", { name: "doomed", code: STARTER });
+    const again = await call("POST", "/api/bots", { name: "doomed", code: STARTER, owner: OWNER });
     expect(again.status).toBe(201);
     expect(again.body.id).not.toBe(id);
     await s.scheduler.whenIdle();
   });
 
   it("a game in flight when its bot is deleted is discarded, not recorded", async () => {
-    const r = await call("POST", "/api/bots", { name: "mid-run", code: STARTER });
+    const r = await call("POST", "/api/bots", { name: "mid-run", code: STARTER, owner: OWNER });
     const { id, token } = r.body;
     // Wait until the first placement game is actually running, then delete.
     while (!s.scheduler.busy) await new Promise((res) => setTimeout(res, 1));
@@ -354,11 +356,105 @@ describe("owner key (browser id)", () => {
   });
 
   it("a token-only (pre-key) bot is linked to the key by a claim with its token, and only then", async () => {
-    const legacy = (await call("POST", "/api/bots", { name: "legacy", code: STARTER })).body;
+    // New bots need an owner key over HTTP; a pre-key bot only exists in old data, so create it directly.
+    const created = s.ladder.submit("legacy", STARTER, undefined);
+    const legacy = { id: created.bot.id, token: created.token! };
+    s.scheduler.enqueuePlacement(legacy.id);
     await s.scheduler.whenIdle();
     expect((await call("POST", "/api/mine", { owner: B, claims: [{ id: legacy.id, token: "f".repeat(64) }] })).body.ids).not.toContain(legacy.id);
     expect((await call("POST", "/api/mine", { owner: B, claims: [{ id: legacy.id, token: legacy.token }] })).body.ids).toContain(legacy.id);
     expect((await call("POST", "/api/mine", { owner: B })).body.ids).toContain(legacy.id); // persisted
     expect((await call("DELETE", `/api/bots/${legacy.id}`, { owner: B })).status).toBe(200);
+  });
+});
+
+describe("botcoin API", () => {
+  let s: RunningServer;
+  let d: string;
+  const A = "d".repeat(64);
+  const B = "e".repeat(64);
+  const call = async (method: string, p: string, body?: unknown) => {
+    const res = await fetch(s.url + p, {
+      method,
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, body: (await res.json()) as any };
+  };
+  beforeAll(async () => {
+    d = fs.mkdtempSync(path.join(os.tmpdir(), "ladder-coin-"));
+    s = await startServer({
+      port: 0, dataDir: d, houseBots: ["idle", "greedy"], serveViewer: false,
+      scheduler: { autoplay: false, idleDelayMs: 0 }, rateLimit: { max: 100, windowMs: 60_000 }, log: () => {},
+    });
+  });
+  afterAll(async () => {
+    await s.close();
+    fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it("wallet, stipend, submission costs, boost and bets", async () => {
+    expect((await call("POST", "/api/wallet", { owner: A })).body).toMatchObject({ exists: false, balance: 0, nextNewBotCost: 0 });
+    expect((await call("POST", "/api/bots", { name: "coin-bot", code: STARTER })).status).toBe(400); // new bots need a key
+    const first = await call("POST", "/api/bots", { name: "coin-bot", code: STARTER, owner: A });
+    expect(first.status).toBe(201);
+    expect(first.body).toMatchObject({ cost: 0, balance: 100 });
+    await s.scheduler.whenIdle();
+    let w = (await call("POST", "/api/wallet", { owner: A })).body;
+    expect(w.exists).toBe(true);
+    expect(w.bots).toEqual([{ id: first.body.id, name: "coin-bot", nextUpdateCost: 0 }]);
+    const afterPlacement = w.balance; // 100 + win/draw payouts from placement games
+    expect(afterPlacement).toBeGreaterThanOrEqual(100);
+
+    // Broken code is never charged.
+    const broken = await call("POST", "/api/bots", { name: "coin-two", code: "export function onTick( {", owner: A });
+    expect(broken.status).toBe(400);
+    expect((await call("POST", "/api/wallet", { owner: A })).body.balance).toBe(afterPlacement);
+
+    // Stipend once a day.
+    expect((await call("POST", "/api/wallet/stipend", { owner: A })).body.balance).toBeCloseTo(afterPlacement + 20, 2);
+    expect((await call("POST", "/api/wallet/stipend", { owner: A })).status).toBe(409);
+    expect((await call("POST", "/api/wallet/stipend", { owner: B })).status).toBe(404);
+
+    // Boost: only the owner, capped, paid, queued ahead of background games.
+    const id = first.body.id;
+    expect((await call("POST", `/api/bots/${id}/boost`, { owner: B, pairs: 1 })).status).toBe(403);
+    expect((await call("POST", `/api/bots/house-idle/boost`, { owner: A, pairs: 1 })).status).toBe(403);
+    expect((await call("POST", `/api/bots/${id}/boost`, { owner: A, pairs: 0 })).status).toBe(400);
+    expect((await call("POST", `/api/bots/${id}/boost`, { owner: A, pairs: 11 })).status).toBe(409);
+    await s.scheduler.stop(); // inspect the queue without workers taking jobs
+    s.scheduler.queue.push({ p1: "house-idle", p2: "house-greedy", seed: 999, reason: "background" });
+    const boost = await call("POST", `/api/bots/${id}/boost`, { owner: A, pairs: 2 });
+    expect(boost.status).toBe(200);
+    expect(boost.body).toMatchObject({ queuedGames: 4, boosted: 2 });
+    expect(boost.body.balance).toBeCloseTo(afterPlacement + 20 - 10, 2);
+    expect(s.scheduler.queue.map((j) => j.reason)).toEqual(["boost", "boost", "boost", "boost", "background"]);
+    expect(s.scheduler.queue.slice(0, 4).every((j) => j.p1 === id || j.p2 === id)).toBe(true);
+    expect((await call("GET", "/api/leaderboard")).body.find((r: any) => r.id === id).boosted).toBe(2);
+
+    // Bet on the next 4 games; the boost games settle it.
+    const bet = await call("POST", `/api/bots/${id}/bet`, { owner: A, stake: 10, games: 4 });
+    expect(bet.status).toBe(200);
+    expect((await call("POST", `/api/bots/${id}/bet`, { owner: A, stake: 10, games: 4 })).status).toBe(409);
+    expect((await call("GET", "/api/leaderboard")).body.find((r: any) => r.id === id).openBet).toEqual({ stake: 10, games: 4, played: 0 });
+    s.scheduler.queue.pop(); // drop the stray background game
+    s.scheduler.start();
+    await s.scheduler.whenIdle();
+    const bets = (await call("GET", "/api/bets")).body;
+    expect(bets[0]).toMatchObject({ botName: "coin-bot", stake: 10, games: 4, played: 4, outcome: "settled" });
+    expect(bets[0].payout).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(bets)).not.toMatch(/owner/);
+
+    // A second bot costs 30; a broke owner gets 402.
+    w = (await call("POST", "/api/wallet", { owner: A })).body;
+    expect(w.nextNewBotCost).toBe(30);
+    const second = await call("POST", "/api/bots", { name: "coin-two", code: STARTER, owner: A });
+    expect(second.body.cost).toBe(30);
+    expect(second.body.balance).toBeCloseTo(w.balance - 30, 2);
+    await s.scheduler.whenIdle();
+    s.ladder.economy.debit(Object.keys(s.ladder.economy.data.wallets)[0]!, (await call("POST", "/api/wallet", { owner: A })).body.balance, "admin");
+    const broke = await call("POST", "/api/bots", { name: "coin-three", code: STARTER, owner: A });
+    expect(broke.status).toBe(402);
+    expect(broke.body).toMatchObject({ cost: 30, balance: 0 });
   });
 });
