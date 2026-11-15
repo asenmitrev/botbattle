@@ -45,12 +45,12 @@ restarts, so keep anything important in `memory`.
 | `isAdjacent(a, b)` | `distance(a, b) === 1` |
 | `nearest(from, list, filter?)` | closest item of `list` (ties: Manhattan, then lowest id) |
 | `enemyBasePos(state)` | `{x, y}` of the enemy starting base (the mirror of `startingBase`); expansions must be scouted |
-| `canAfford(state, what, count?)` | whether banked resources cover `what` (`"worker"`, `"turret"`, `"armor"`, …) |
+| `canAfford(state, what, count?)` | whether banked resources cover `what` (`"worker"`, `"turret"`, `"base"`, …) |
 | `rememberMap(state, memory)` | accumulates seen terrain in `memory.map` (a string; `?` means unknown) |
 | `pathTo(state, from, to, { map?, avoid? })` | BFS path `[{x, y, dir}]` over known terrain; `avoid` adds blocked tiles (e.g. units) |
 | `freeNeighbors(state, p)` | free tiles around `p` (8-neighborhood) |
 | `inSafeZone(state, p, margin?)` | whether `p` is inside next tick's zone |
-| `COSTS`, `DIRS` | cost table; direction → `{x, y}` offset |
+| `COSTS`, `UPGRADE_COSTS`, `DIRS` | spawn/build cost table; per-unit upgrade costs keyed by `"scout"`/`"fighter"`/`"wall"`; direction → `{x, y}` offset |
 
 ## Game in one paragraph
 
@@ -70,7 +70,7 @@ Both bots act simultaneously.
 - Starting bases are point mirrors: `enemyStartingBase = { x: 39 - startingBase.x, y: 39 - startingBase.y }`. Additional bases can be built anywhere on empty floor adjacent to a worker.
 - **Adjacent** means Chebyshev distance 1 (`max(|dx|,|dy|) === 1`), so diagonals count.
   Harvest, deposit, build and attack all need adjacency (turrets: range 4).
-- Movement is 1 orthogonal step per tick (scouts take 2, or 4 with Scout Speed).
+- Movement is 1 orthogonal step per tick (scouts take 2, or 4 when upgraded).
 
 ## `state`
 
@@ -82,11 +82,10 @@ Both bots act simultaneously.
   myBases: [{ id, x, y, hp }];       // all living friendly bases, ascending ID
   startingBase: { x, y };           // original position, even after destruction
   myUnits: [{ id, type: "worker"|"fighter"|"scout", x, y, hp, maxHp,
-              cargo: { energy, crystal }, cargoCapacity }];
-  myStructures: [{ id, type: "turret"|"wall", x, y, hp }];
+              cargo: { energy, crystal }, cargoCapacity, upgraded }];
+  myStructures: [{ id, type: "turret"|"wall", x, y, hp, maxHp, upgraded }];
   energy: number; crystal: number;  // banked
-  upgrades: { cargo: boolean, armor: boolean, weapons: boolean, scoutSpeed: boolean };
-  visibleEnemies: [{ id, kind: "unit"|"structure"|"base", type, x, y, hp }];
+  visibleEnemies: [{ id, kind: "unit"|"structure"|"base", type, x, y, hp, upgraded }]; // no `upgraded` on bases
   visibleNodes: [{ id, type: "energy"|"crystal", x, y, amount }];
   visibleTiles: [{ x, y, type: "floor"|"wall"|"energy_node"|"crystal_node" }];
   mapSize: 40;
@@ -107,14 +106,14 @@ Each unit gets at most **one** action per tick; extras are ignored.
 
 | Action | Effect |
 |---|---|
-| `{ type: "move", unitId, dir }` | Step N/S/E/W at the unit's speed (scouts: 2 steps, or 4 with Scout Speed). |
-| `{ type: "moveTo", unitId, x, y }` | Engine takes one shortest-path step toward (x,y) (two for scouts, or four with Scout Speed). Avoids terrain/structures, ignores units. If (x,y) is blocked (a node, a base), it stops next to it. |
+| `{ type: "move", unitId, dir }` | Step N/S/E/W at the unit's speed (scouts: 2 steps, or 4 when upgraded). |
+| `{ type: "moveTo", unitId, x, y }` | Engine takes one shortest-path step toward (x,y) (two for scouts, or four when upgraded). Avoids terrain/structures, ignores units. If (x,y) is blocked (a node, a base), it stops next to it. |
 | `{ type: "harvest", unitId, nodeId }` | Worker adjacent to a node takes up to 5 into cargo. |
 | `{ type: "deposit", unitId }` | Worker adjacent to any living friendly base banks all cargo in the player's shared resource balance. |
 | `{ type: "attack", unitId, targetId }` | Fighter hits an adjacent enemy unit, structure or base. |
 | `{ type: "build", unitId, structure: "turret"\|"wall"\|"base", x, y }` | Worker builds on an adjacent empty floor tile. Bases cost 100 energy + 50 crystals and have no construction distance limit. |
 | `{ type: "spawn", unit: "worker"\|"fighter"\|"scout", baseId? }` | Spawn beside a living friendly base. Optional `baseId` selects it; otherwise try bases in ascending ID order. Max 1 spawn per player per tick. |
-| `{ type: "upgrade", upgrade: "cargo"\|"armor"\|"weapons"\|"scoutSpeed" }` | One-time global upgrade, effective immediately for current and future eligible units. |
+| `{ type: "upgrade", targetId }` | Upgrades one of your scouts, fighters or walls (once per entity), effective immediately. |
 | `{ type: "log", text }` | Message shown in the replay viewer. |
 | `{ type: "mark", x, y, color, label }` | Debug marker drawn in the replay viewer. |
 
@@ -122,16 +121,15 @@ Each unit gets at most **one** action per tick; extras are ignored.
 
 | | Cost | HP | Speed | Vision | Notes |
 |---|---|---|---|---|---|
-| Worker | 50 E | 10 | 1 | 5 | carries 20 (30 with Cargo), harvests 5/tick, builds |
-| Fighter | 60 E + 15 C | 30 | 1 | 5 | 6 damage (9 with Weapons), range 1 |
-| Scout | 30 E | 5 | 2 (4 with Scout Speed) | 9 | attack 1 dmg, range 1; cannot carry |
+| Worker | 50 E | 10 | 1 | 5 | carries 20, harvests 5/tick, builds |
+| Fighter | 60 E + 15 C | 30 | 1 | 5 | 6 damage, range 1 |
+| Scout | 30 E | 5 | 2 | 9 | attack 1 dmg, range 1; cannot carry |
 | Turret | 100 E | 50 | – | 4 | auto-shoots lowest-HP enemy unit within 4 for 4 dmg; must be within 8 of any living friendly base |
-| Wall | 5 E | 60 | – | – | blocks movement |
+| Wall | 3 E | 60 | – | – | blocks movement |
 | Base | 100 E + 50 C | 200 | – | 7 | deposits, spawning, turret placement within 8; immune to zone damage |
-| Upgrade Cargo | 30 C | | | | |
-| Upgrade Armor | 40 C | | | | your units take 2 less damage (min 1) |
-| Upgrade Weapons | 40 C | | | | |
-| Upgrade Scout Speed (`scoutSpeed`) | 15 C | | | | doubles scout speed from 2 to 4, including the purchase tick |
+| Scout upgrade | 15 C | ×2 (10) | ×2 (4) | | per scout |
+| Fighter upgrade | 20 C | | | | per fighter: turrets ignore it |
+| Wall upgrade | 50 E | ×2 (120) | | | per wall |
 
 Energy nodes hold 600 and regenerate 1/tick. Crystal nodes hold 200 and do not regenerate.
 Fighters need crystal, so you must contest the center.

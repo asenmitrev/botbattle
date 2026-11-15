@@ -6,6 +6,7 @@ import {
   computeScore,
   findSpawnTile,
   makeUnit,
+  maxHp,
   occupancy,
   unitSpeed,
   zoneCenter,
@@ -19,7 +20,8 @@ type UnitAction = Extract<Action, { unitId: number }>;
 interface Intents {
   unit: Map<number, UnitAction>;
   spawn: Extract<Action, { type: "spawn" }> | null;
-  upgrades: UpgradeType[];
+  /** Upgrade target IDs, in action order. */
+  upgrades: number[];
 }
 
 const PLAYERS: readonly PlayerId[] = [1, 2];
@@ -185,10 +187,9 @@ function collectIntents(state: GameState, player: PlayerId, raw: unknown, events
         break;
       }
       case "upgrade": {
-        const up = act.upgrade as UpgradeType;
-        if (!UPGRADE_TYPES.includes(up)) invalid(sanitize(act), "unknown upgrade");
-        else if (intents.upgrades.includes(up)) invalid(sanitize(act), "duplicate upgrade");
-        else intents.upgrades.push(up);
+        if (!isInt(act.targetId)) invalid(sanitize(act), "missing targetId");
+        else if (intents.upgrades.includes(act.targetId)) invalid(sanitize(act), "duplicate upgrade");
+        else intents.upgrades.push(act.targetId);
         break;
       }
       case "move":
@@ -277,15 +278,29 @@ function sanitize(v: unknown): unknown {
 
 function applyUpgrades(state: GameState, player: PlayerId, intents: Intents, events: GameEvent[]): void {
   const p = state.players[player - 1]!;
-  for (const up of intents.upgrades) {
-    const cost = CONFIG.upgrades[up].costCrystal;
-    const action = { type: "upgrade", upgrade: up };
-    if (p.upgrades[up]) events.push({ type: "invalid_action", player, action, reason: "already purchased" });
-    else if (p.crystal < cost) events.push({ type: "invalid_action", player, action, reason: "not enough crystal" });
+  for (const targetId of intents.upgrades) {
+    const action = { type: "upgrade", targetId };
+    const fail = (reason: string) => events.push({ type: "invalid_action", player, action, reason });
+    const target = state.units.find((u) => u.id === targetId) ?? state.structures.find((x) => x.id === targetId);
+    if (!target || target.owner !== player) {
+      fail("no such unit or structure (or not yours)");
+      continue;
+    }
+    if (!UPGRADE_TYPES.includes(target.type as UpgradeType)) {
+      fail(`${target.type} has no upgrade`);
+      continue;
+    }
+    const up = target.type as UpgradeType;
+    const cost = CONFIG.upgrades[up];
+    if (target.upgraded) fail("already upgraded");
+    else if (p.energy < cost.costEnergy || p.crystal < cost.costCrystal) fail("not enough resources");
     else {
-      p.crystal -= cost;
-      p.upgrades[up] = true;
-      events.push({ type: "upgrade", player, upgrade: up });
+      p.energy -= cost.costEnergy;
+      p.crystal -= cost.costCrystal;
+      const before = maxHp(target);
+      target.upgraded = true;
+      target.hp += maxHp(target) - before;
+      events.push({ type: "upgrade", player, targetId, upgrade: up });
     }
   }
 }
@@ -320,7 +335,7 @@ function applySpawn(state: GameState, player: PlayerId, intents: Intents, events
 function resolveMovement(prev: GameState, state: GameState, intents: [Intents, Intents], events: GameEvent[]): void {
   const size = state.map.size;
   const staticOcc = occupancy(state, false);
-  const maxSpeed = state.units.reduce((max, u) => Math.max(max, unitSpeed(state, u.owner, u.type)), 0);
+  const maxSpeed = state.units.reduce((max, u) => Math.max(max, unitSpeed(u)), 0);
 
   // moveTo distance fields, cached per (player, target) for this tick. Paths use
   // terrain, bases and the structures the player could see at the start of the tick.
@@ -344,7 +359,7 @@ function resolveMovement(prev: GameState, state: GameState, intents: [Intents, I
     const byId = new Map<number, Unit>();
     for (const u of state.units) {
       byId.set(u.id, u);
-      if (unitSpeed(state, u.owner, u.type) < sub) continue;
+      if (unitSpeed(u) < sub) continue;
       const act = intents[u.owner - 1]!.unit.get(u.id);
       if (!act || (act.type !== "move" && act.type !== "moveTo")) continue;
       let dir: Dir | null;
@@ -466,7 +481,7 @@ function resolveHarvest(state: GameState, intents: [Intents, Intents], events: G
       return a.unit.id - b.unit.id;
     });
     for (const { unit, act } of reqs) {
-      const cap = cargoCapacity(state, unit.owner, unit.type);
+      const cap = cargoCapacity(unit.type);
       const space = cap - unit.cargo.energy - unit.cargo.crystal;
       const amount = Math.min(CONFIG.units[unit.type].harvest, space, node.amount);
       if (amount <= 0) {
@@ -552,7 +567,7 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
       if (r.act.structure === "base") {
         state.bases.push({ id, owner: p, x: r.act.x, y: r.act.y, hp: spec.hp });
       } else {
-        state.structures.push({ id, owner: p, type: r.act.structure, x: r.act.x, y: r.act.y, hp: spec.hp });
+        state.structures.push({ id, owner: p, type: r.act.structure, x: r.act.x, y: r.act.y, hp: spec.hp, upgraded: false });
       }
       events.push({ type: "build", player: p, unitId: r.unit.id, structureId: id, structure: r.act.structure, x: r.act.x, y: r.act.y });
     }
@@ -569,12 +584,7 @@ function resolveCombat(state: GameState, intents: [Intents, Intents], events: Ga
   for (const b of state.bases) if (b.hp > 0) targets.set(b.id, { id: b.id, owner: b.owner, x: b.x, y: b.y, hp: b.hp, isUnit: false });
 
   const damage = new Map<number, number>();
-  const hit = (attackerId: number, t: Target, raw: number) => {
-    let dmg = raw;
-    if (t.isUnit && state.players[t.owner - 1]!.upgrades.armor) {
-      const a = CONFIG.upgrades.armor;
-      dmg = Math.max(a.minDamage, dmg - a.damageReduction);
-    }
+  const hit = (attackerId: number, t: Target, dmg: number) => {
     damage.set(t.id, (damage.get(t.id) ?? 0) + dmg);
     events.push({ type: "attack", attackerId, targetId: t.id, damage: dmg });
   };
@@ -597,8 +607,7 @@ function resolveCombat(state: GameState, intents: [Intents, Intents], events: Ga
       fail("target out of range");
       continue;
     }
-    const bonus = u.type === "fighter" && state.players[u.owner - 1]!.upgrades.weapons ? CONFIG.upgrades.weapons.fighterDamageBonus : 0;
-    hit(u.id, t, spec.damage + bonus);
+    hit(u.id, t, spec.damage);
   }
 
   for (const s of state.structures) {
@@ -607,6 +616,7 @@ function resolveCombat(state: GameState, intents: [Intents, Intents], events: Ga
     let best: Unit | null = null;
     for (const u of state.units) {
       if (u.owner === s.owner || chebyshev(u, s) > sc.range) continue;
+      if (u.type === "fighter" && u.upgraded) continue; // upgraded fighters are immune to turrets
       if (!best || u.hp < best.hp || (u.hp === best.hp && u.id < best.id)) best = u;
     }
     if (best) hit(s.id, targets.get(best.id)!, sc.damage);

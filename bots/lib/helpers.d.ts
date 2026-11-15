@@ -1,10 +1,11 @@
-import type { BotState, Dir, Memory, Pos } from "./api";
+import type { BotState, Dir, Memory, Pos, UpgradeType } from "./api";
 
 export declare const DIRS: Record<Dir, Pos>;
 export declare const COSTS: Record<
-  "worker" | "fighter" | "scout" | "turret" | "wall" | "base" | "cargo" | "armor" | "weapons" | "scoutSpeed",
+  "worker" | "fighter" | "scout" | "turret" | "wall" | "base",
   { energy: number; crystal: number }
 >;
+export declare const UPGRADE_COSTS: Record<UpgradeType, { energy: number; crystal: number }>;
 export declare function distance(a: Pos, b: Pos): number;
 export declare function manhattan(a: Pos, b: Pos): number;
 export declare function isAdjacent(a: Pos, b: Pos): boolean;

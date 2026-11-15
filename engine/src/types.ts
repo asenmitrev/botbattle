@@ -41,6 +41,8 @@ export interface Unit extends Pos {
   type: UnitType;
   hp: number;
   cargo: Cargo;
+  /** Bought its type's upgrade (see CONFIG.upgrades). Absent in replays older than config 2.0.0. */
+  upgraded?: boolean;
 }
 
 export interface Structure extends Pos {
@@ -48,20 +50,14 @@ export interface Structure extends Pos {
   owner: PlayerId;
   type: StructureType;
   hp: number;
-}
-
-export interface Upgrades {
-  cargo: boolean;
-  armor: boolean;
-  weapons: boolean;
-  scoutSpeed: boolean;
+  /** Bought its type's upgrade (see CONFIG.upgrades). Absent in replays older than config 2.0.0. */
+  upgraded?: boolean;
 }
 
 export interface PlayerState {
   id: PlayerId;
   energy: number;
   crystal: number;
-  upgrades: Upgrades;
 }
 
 export type Winner = PlayerId | "draw";
@@ -100,7 +96,7 @@ export type Action =
   | { type: "attack"; unitId: number; targetId: number }
   | { type: "build"; unitId: number; structure: BuildType; x: number; y: number }
   | { type: "spawn"; unit: UnitType; baseId?: number }
-  | { type: "upgrade"; upgrade: UpgradeType }
+  | { type: "upgrade"; targetId: number }
   | { type: "log"; text: string }
   | { type: "mark"; x: number; y: number; color?: string; label?: string };
 
@@ -111,7 +107,7 @@ export type EntityKind = "unit" | "structure" | "base";
 export type GameEvent =
   | { type: "invalid_action"; player: PlayerId; action: unknown; reason: string }
   | { type: "spawn"; player: PlayerId; unitId: number; unit: UnitType; x: number; y: number }
-  | { type: "upgrade"; player: PlayerId; upgrade: UpgradeType }
+  | { type: "upgrade"; player: PlayerId; targetId: number; upgrade: UpgradeType }
   | { type: "harvest"; player: PlayerId; unitId: number; nodeId: number; resource: NodeType; amount: number }
   | { type: "deposit"; player: PlayerId; unitId: number; energy: number; crystal: number }
   | { type: "build"; player: PlayerId; unitId: number; structureId: number; structure: BuildType; x: number; y: number }

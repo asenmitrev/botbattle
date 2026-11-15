@@ -7,7 +7,8 @@ export type Dir = "N" | "S" | "E" | "W";
 export type UnitType = "worker" | "fighter" | "scout";
 export type StructureType = "turret" | "wall";
 export type BuildType = StructureType | "base";
-export type UpgradeType = "cargo" | "armor" | "weapons" | "scoutSpeed";
+/** Types that have a per-unit upgrade. */
+export type UpgradeType = "scout" | "wall" | "fighter";
 export type NodeType = "energy" | "crystal";
 export type TileType = "floor" | "wall" | "energy_node" | "crystal_node";
 
@@ -23,13 +24,15 @@ export interface MyUnit {
   cargo: { energy: number; crystal: number };
   /** 0 for units that cannot carry. */
   cargoCapacity: number;
+  /** This unit has bought its type's upgrade. */
+  upgraded: boolean;
 }
 
-export interface MyStructure { id: number; type: StructureType; x: number; y: number; hp: number }
+export interface MyStructure { id: number; type: StructureType; x: number; y: number; hp: number; maxHp: number; upgraded: boolean }
 
 export type Enemy =
-  | { id: number; kind: "unit"; type: UnitType; x: number; y: number; hp: number }
-  | { id: number; kind: "structure"; type: StructureType; x: number; y: number; hp: number }
+  | { id: number; kind: "unit"; type: UnitType; x: number; y: number; hp: number; upgraded: boolean }
+  | { id: number; kind: "structure"; type: StructureType; x: number; y: number; hp: number; upgraded: boolean }
   | { id: number; kind: "base"; type: "base"; x: number; y: number; hp: number };
 
 export interface VisibleNode { id: number; type: NodeType; x: number; y: number; amount: number }
@@ -57,7 +60,6 @@ export interface BotState {
   myStructures: MyStructure[];
   energy: number;
   crystal: number;
-  upgrades: { cargo: boolean; armor: boolean; weapons: boolean; scoutSpeed: boolean };
   visibleEnemies: Enemy[];
   visibleNodes: VisibleNode[];
   visibleTiles: VisibleTile[];
@@ -75,7 +77,8 @@ export type Action =
   | { type: "attack"; unitId: number; targetId: number }
   | { type: "build"; unitId: number; structure: BuildType; x: number; y: number }
   | { type: "spawn"; unit: UnitType; baseId?: number }
-  | { type: "upgrade"; upgrade: UpgradeType }
+  /** Upgrade one of your scouts, fighters or walls (once per entity). */
+  | { type: "upgrade"; targetId: number }
   | { type: "log"; text: string }
   | { type: "mark"; x: number; y: number; color?: string; label?: string };
 

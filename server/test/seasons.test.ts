@@ -109,4 +109,55 @@ describe("startNewSeason", () => {
     expect(() => startNewSeason(path.join(root, "nope"))).toThrow(/no ladder.json/);
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  describe("Elo cut at the start of a new season", () => {
+    const code = "export function onTick(){return []}";
+    async function endSeasonWith(elos: Record<string, number>) {
+      const { startNewSeason } = await import("../src/index.js");
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "season-cut-"));
+      const dir = path.join(root, "data");
+      const l = new Ladder(new JsonFileStore(dir));
+      const ids: Record<string, string> = {};
+      for (const [name, elo] of Object.entries(elos)) {
+        const { bot } = l.submit(name, code, { owner: "a".repeat(64) });
+        bot.elo = elo;
+        ids[name] = bot.id;
+      }
+      l.save();
+      const r = startNewSeason(dir, new Date(2026, 10, 14, 9, 0, 0)); // default threshold
+      const fresh = new Ladder(new JsonFileStore(dir));
+      const archived = new JsonFileStore(r.archive);
+      return { r, fresh, archived, ids, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+    }
+
+    it("removes a bot that finished below SEASON_MIN_ELO, keeping it in the archive", async () => {
+      const { SEASON_MIN_ELO } = await import("../src/index.js");
+      expect(SEASON_MIN_ELO).toBe(1200);
+      const { r, fresh, archived, ids, cleanup } = await endSeasonWith({ weak: 1150, strong: 1300 });
+      expect(r.minElo).toBe(1200);
+      expect(r.dropped).toEqual([{ name: "weak", elo: 1150 }]);
+      expect(fresh.bot(ids.weak!)).toBeUndefined();
+      expect(fresh.byName("weak")).toBeUndefined();
+      expect(fresh.store.loadCode(ids.weak!)).toBeNull();
+      expect(archived.load().bots.find((b) => b.id === ids.weak)?.elo).toBe(1150);
+      expect(archived.loadCode(ids.weak!)).toContain("onTick");
+      cleanup();
+    });
+
+    it("keeps a bot that finished above 1200, reset to the starting Elo", async () => {
+      const { r, fresh, ids, cleanup } = await endSeasonWith({ strong: 1450 });
+      expect(r.dropped).toEqual([]);
+      expect(fresh.bot(ids.strong!)).toMatchObject({ name: "strong", elo: 1200, games: 0 });
+      expect(fresh.store.loadCode(ids.strong!)).toContain("onTick");
+      cleanup();
+    });
+
+    it("keeps a bot that finished at exactly 1200", async () => {
+      const { r, fresh, ids, cleanup } = await endSeasonWith({ exact: 1200, below: 1199 });
+      expect(r.dropped).toEqual([{ name: "below", elo: 1199 }]);
+      expect(fresh.bot(ids.exact!)).toMatchObject({ name: "exact", elo: 1200 });
+      expect(fresh.store.loadCode(ids.exact!)).toContain("onTick");
+      cleanup();
+    });
+  });
 });

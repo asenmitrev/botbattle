@@ -35,25 +35,28 @@ the shrinking zone, fog of war and the exact tick resolution order.
 | | Cost | HP | Speed | Vision | Notes |
 |---|---|---|---|---|---|
 | Worker | 50 E | 10 | 1 | 5 | carries 20, harvests 5/tick, builds; can't attack |
-| Fighter | 60 E + 15 C | 30 | 1 | 5 | attacks for 6 (9 with Weapons), range 1 |
-| Scout | 30 E | 5 | 2 (4 with Scout Speed) | 9 | attacks for 1, range 1; can't carry |
+| Fighter | 60 E + 15 C | 30 | 1 | 5 | attacks for 6, range 1 |
+| Scout | 30 E | 5 | 2 | 9 | attacks for 1, range 1; can't carry |
 | Turret | 100 E | 50 | – | 4 | auto-shoots the lowest-HP enemy unit within 4 for 4; must be built within Chebyshev 8 of any living friendly base |
-| Wall | 5 E | 60 | – | – | blocks movement |
+| Wall | 3 E | 60 | – | – | blocks movement |
 | Base | 100 E + 50 C | 200 | – | 7 | workers deposit resources here; supports spawning and nearby turrets; immune to zone damage |
 
 E = energy, C = crystal. A build or spawn needs the full cost in both resources.
 
 ### Upgrades
 
-Upgrades are one-time purchases paid in crystal, for example `{ type: "upgrade", upgrade: "scoutSpeed" }`.
-Each applies immediately to all your current and future eligible units.
+Upgrades are bought for one specific unit or wall with `{ type: "upgrade", targetId }`. Each scout,
+fighter or wall can be upgraded once; units spawned later start without it. The upgrade takes effect
+immediately, on the tick it is bought.
 
-| Upgrade | Cost | Effect |
+| Upgrades | Cost | Effect |
 |---|---|---|
-| `cargo` | 30 C | worker capacity 20 → 30 |
-| `armor` | 40 C | your units take 2 less damage from attacks (minimum 1) |
-| `weapons` | 40 C | fighters deal 9 damage instead of 6 |
-| `scoutSpeed` | 15 C | scouts move 4 tiles per tick instead of 2 |
+| Scout | 15 C | speed 2 → 4 and max HP 5 → 10 |
+| Fighter | 20 C | immune to turrets: turrets ignore it and shoot other targets |
+| Wall | 50 E | max HP 60 → 120 |
+
+When max HP doubles, the entity also gains the extra HP right away, so a damaged scout at 2/5 becomes 7/10.
+Workers and turrets have no upgrade. An upgraded fighter still takes full damage from enemy units and the zone.
 
 ### Multiple bases
 
@@ -127,8 +130,9 @@ All ladder games run server-side in the isolated-vm sandbox, 8 at a time by defa
   fewer of them. The live server runs with `none`.
 - **Seasons**: `arena new-season --data ./data [--min-elo 1200]` (with the server stopped) archives the data dir as `data-backup-YYYYMMDD-HHMMSS` (served
   read-only under past seasons) and starts the ladder over: every bot that carries over goes back to
-  1200 Elo with no games, and the match history and replays are cleared. With `--min-elo N`, bots that
-  finished below N (as shown, rounded) are left behind; they stay in the archive. Bot code and tokens are kept.
+  1200 Elo with no games, and the match history and replays are cleared. Bots that finished the season
+  below 1200 Elo (as shown, rounded) are removed from the ladder and stay only in the archive; `--min-elo N`
+  sets a different threshold. Bot code and tokens are kept.
 - **Ending a season live**: the leaderboard's **End season** button (password: `djbobo`, or set
   `ARENA_ADMIN_PASSWORD`) calls `POST /api/admin/end-season`. The ladder stops, and the top 8 bots by Elo (that
   played this season) play a knockout playoff: 1v8, 4v5, 2v7, 3v6, then semifinals and a final, every matchup 5

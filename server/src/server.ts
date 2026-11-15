@@ -252,7 +252,8 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
       }
       const r = startNewSeason(dataDir, new Date(), { minElo });
       if (p) p.seasonId = r.id;
-      log(`season archived as ${r.archive}; ${r.bots} bots carried over${r.dropped.length ? `, ${r.dropped.length} left behind` : ""}`);
+      log(`season archived as ${r.archive}; ${r.bots} bots carried over`);
+      if (r.dropped.length) log(`left behind (below ${r.minElo} Elo): ${r.dropped.map((d) => `${d.name} (${d.elo})`).join(", ")}`);
       store = new JsonFileStore(dataDir);
       ladder = new Ladder(store);
       if (pool) ladder.runner = pool.run;

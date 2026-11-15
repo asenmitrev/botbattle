@@ -9,6 +9,7 @@ export {
   computeScore,
   cargoCapacity,
   unitSpeed,
+  maxHp,
   unitValue,
   zoneRadius,
   zoneCenter,

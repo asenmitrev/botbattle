@@ -7,12 +7,15 @@ export const COSTS = {
   fighter: { energy: 60, crystal: 15 },
   scout: { energy: 30, crystal: 0 },
   turret: { energy: 100, crystal: 0 },
-  wall: { energy: 5, crystal: 0 },
+  wall: { energy: 3, crystal: 0 },
   base: { energy: 100, crystal: 50 },
-  cargo: { energy: 0, crystal: 30 },
-  armor: { energy: 0, crystal: 40 },
-  weapons: { energy: 0, crystal: 40 },
-  scoutSpeed: { energy: 0, crystal: 15 },
+};
+
+/** Per-unit upgrade costs, keyed by the type being upgraded. */
+export const UPGRADE_COSTS = {
+  scout: { energy: 0, crystal: 15 },
+  wall: { energy: 50, crystal: 0 },
+  fighter: { energy: 0, crystal: 20 },
 };
 
 /** Chebyshev distance — the metric used for all action ranges (adjacent = 1). */

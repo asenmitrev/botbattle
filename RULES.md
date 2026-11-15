@@ -77,7 +77,7 @@ the next tick. A bot whose initialization fails fails every tick.
 | Crystal | 200 | none |
 
 - A worker adjacent to a node can `harvest` it: it takes `min(5, free cargo, node amount)` into its cargo.
-- Energy and crystal share one cargo capacity (20, or 30 with the Cargo upgrade).
+- Energy and crystal share one cargo capacity of 20.
 - Resources only count once a worker adjacent to any living friendly base does `deposit` (all cargo is deposited into the player's shared energy and crystal balance).
 - **Contested nodes**: if several workers harvest the same node in a tick, player 1's workers
   go first on even ticks and player 2's on odd ticks; within a player, lowest unit ID first.
@@ -88,7 +88,7 @@ the next tick. A bot whose initialization fails fails every tick.
 |---|---|---|---|---|---|
 | Worker | 50 E | 10 | 1 | 5 | carry 20, harvest 5/tick, build |
 | Fighter | 60 E + 15 C | 30 | 1 | 5 | attack 6 dmg, range 1 |
-| Scout | 30 E | 5 | 2 (4 with Scout Speed) | 9 | attack 1 dmg, range 1 |
+| Scout | 30 E | 5 | 2 (4 when upgraded) | 9 | attack 1 dmg, range 1 |
 
 - **Base**: 200 HP, vision 7. Additional bases cost 100 energy + 50 crystals and are built by workers with `structure: "base"`. Bases cannot move and are never hurt by the zone.
 - **Spawning**: at most 1 unit per player per tick, regardless of base count. An optional `baseId` selects a living friendly base. Without it, living friendly bases are tried in ascending ID order until a free spawn tile is found. Newly built bases can spawn starting next tick.
@@ -102,8 +102,8 @@ A worker builds on an empty floor tile adjacent to it. Building is instant and p
 
 | Structure | Cost | HP | Notes |
 |---|---|---|---|
-| Turret | 100 E | 50 | 4 dmg, range 4, vision 4. Must be within Chebyshev 8 of any living friendly base. Auto-targets the lowest-HP enemy **unit** in range (ties → lowest ID). |
-| Wall | 5 E | 60 | Blocks movement. No vision. |
+| Turret | 100 E | 50 | 4 dmg, range 4, vision 4. Must be within Chebyshev 8 of any living friendly base. Auto-targets the lowest-HP enemy **unit** in range (ties → lowest ID), skipping upgraded fighters. |
+| Wall | 3 E | 60 (120 when upgraded) | Blocks movement. No vision. |
 | Base | 100 E + 50 C | 200 | Vision 7, resource deposits, spawning, and turret placement within Chebyshev 8. No distance limit for construction. Immune to zone damage. |
 
 - The tile must be empty *after movement* this tick: no unit, structure, base or node.
@@ -115,19 +115,25 @@ A worker builds on an empty floor tile adjacent to it. Building is instant and p
 
 ## 8. Upgrades
 
-Upgrades are bought at the base with crystal. Each can be bought once, applies to all your current and future eligible units, and takes effect immediately.
+Upgrades belong to a single entity: `{ type: "upgrade", targetId }` upgrades one of your living scouts,
+fighters or walls. Each entity can be upgraded once (`upgraded: true` afterwards). Units spawned later are not
+upgraded. There is no range requirement, and the upgrade takes effect immediately, on the tick it is bought.
 
-| Upgrade | Cost | Effect |
+| Target | Cost | Effect |
 |---|---|---|
-| Cargo | 30 C | Worker capacity 20 → 30 |
-| Armor | 40 C | Units take −2 damage from attacks (minimum 1). Not structures, the base, or zone damage. |
-| Weapons | 40 C | Fighters deal +3 damage (6 → 9). Turrets are unaffected. |
-| Scout Speed (`scoutSpeed`) | 15 C | Doubles scout speed from 2 to 4 tiles per tick for both `move` and `moveTo`, including the purchase tick. Other units are unaffected. |
+| Scout | 15 C | Speed 2 → 4 tiles per tick for both `move` and `moveTo`, and max HP 5 → 10. |
+| Fighter | 20 C | Immune to turrets: turrets never target it and pick the next valid unit instead. Enemy units and the zone still damage it normally. |
+| Wall | 50 E | Max HP 60 → 120. |
+
+- When max HP doubles, current HP rises by the same amount (a wall at 10/60 becomes 70/120).
+- Workers, turrets and bases have no upgrade. Upgrading one gives an `invalid_action` (`"<type> has no upgrade"`).
+- An upgrade fails with `invalid_action` if the target is missing or not yours, already upgraded, listed twice in the same tick, or you can't cover the cost. Nothing is deducted when it fails.
+- Several upgrades per tick are allowed and are paid in action order.
 
 ## 9. Combat
 
 - Fighters (6 dmg) and scouts (1 dmg) `attack` one enemy unit, structure, or base within range 1. They cannot attack their own side.
-- Turrets fire automatically.
+- Turrets fire automatically at enemy units only, never at upgraded fighters.
 - All damage is computed from the **pre-combat** state and applied **simultaneously**,
   so two units can kill each other in the same tick.
 
@@ -136,7 +142,7 @@ Upgrades are bought at the base with crystal. Each can be bought once, applies t
 - The safe zone is a circle centered at (19.5, 19.5).
 - Its radius is 28 until tick 399, which covers the whole map. At tick 400 it becomes 27,
   then shrinks by 1 every 4 ticks: `radius(t) = 28 − (1 + ⌊(t − 400)/4⌋)` for t ≥ 400, so 3 by tick 499.
-- Units and structures outside the zone (`dx² + dy² > r²`) take 3 damage per tick. Armor does not reduce it. Bases are immune.
+- Units and structures outside the zone (`dx² + dy² > r²`) take 3 damage per tick. Bases are immune.
 - Note: each starting base is ≈21.9 from the center, so from about tick 424 the area around both starting bases is outside the zone.
 
 ## 11. Fog of war

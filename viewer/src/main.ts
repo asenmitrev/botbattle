@@ -443,10 +443,7 @@ function renderStats(s: GameState): void {
   const sc = model.series.score;
   const count = (p: PlayerId, type: string) => s.units.filter((u) => u.owner === p && u.type === type).length;
   const turrets = (p: PlayerId) => s.structures.filter((x) => x.owner === p && x.type === "turret").length;
-  const ups = (p: PlayerId) => {
-    const u = s.players[p - 1]!.upgrades;
-    return [u.cargo ? "C" : "", u.armor ? "A" : "", u.weapons ? "W" : "", u.scoutSpeed ? "Scout Speed" : ""].filter(Boolean).join(" ") || "–";
-  };
+  const ups = (p: PlayerId) => [...s.units, ...s.structures].filter((e) => e.owner === p && e.upgraded).length;
   const row = (label: string, f: (p: PlayerId) => string | number) => `<tr><td>${label}</td><td>${f(1)}</td><td>${f(2)}</td></tr>`;
   $("stats").innerHTML = `
     <table class="stats-table">
@@ -541,10 +538,10 @@ $("board").addEventListener("mousemove", (e) => {
   const at = (o: { x: number; y: number }) => o.x === p.x && o.y === p.y;
   for (const n of s.nodes.filter(at)) parts.push(`${n.type} node #${n.id}: ${n.amount}`);
   for (const b of s.bases.filter((b) => b.hp > 0 && at(b))) parts.push(`P${b.owner} base #${b.id}: ${b.hp} HP`);
-  for (const x of s.structures.filter(at)) parts.push(`P${x.owner} ${x.type} #${x.id}: ${x.hp} HP`);
+  for (const x of s.structures.filter(at)) parts.push(`P${x.owner} ${x.upgraded ? "upgraded " : ""}${x.type} #${x.id}: ${x.hp} HP`);
   for (const u of s.units.filter(at)) {
     const cargo = u.cargo.energy || u.cargo.crystal ? ` cargo ${u.cargo.energy}E ${u.cargo.crystal}C` : "";
-    parts.push(`P${u.owner} ${u.type} #${u.id}: ${u.hp} HP${cargo}`);
+    parts.push(`P${u.owner} ${u.upgraded ? "upgraded " : ""}${u.type} #${u.id}: ${u.hp} HP${cargo}`);
   }
   if (s.map.tiles[p.y * s.map.size + p.x] === "#") parts.push("wall");
   info.textContent = parts.join(" · ");

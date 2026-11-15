@@ -47,17 +47,16 @@ export function onTick(state, memory) {
   for (const u of workers) {
     if (!memory.role[u.id]) memory.role[u.id] = count("energy") < ENERGY_WORKERS ? "energy" : "crystal";
   }
+  let crystal = state.crystal;
   if (!late && workers.length < ENERGY_WORKERS + CRYSTAL_WORKERS && state.energy >= 50) {
     actions.push({ type: "spawn", unit: "worker" });
-  } else if (state.energy >= 60 && state.crystal >= 15) {
+  } else if (state.energy >= 60 && crystal >= 15) {
     actions.push({ type: "spawn", unit: "fighter" });
+    crystal -= 15;
   }
-  // Weapons (+50% damage) as soon as there is an army; armor once the army is established.
-  if (!state.upgrades.weapons && fighters.length >= 3 && state.crystal >= 40) {
-    actions.push({ type: "upgrade", upgrade: "weapons" });
-  } else if (state.upgrades.weapons && !state.upgrades.armor && fighters.length >= 5 && state.crystal >= 40) {
-    actions.push({ type: "upgrade", upgrade: "armor" });
-  }
+  // Once there is an army, make fighters immune to turrets (one per tick, oldest first).
+  const plain = fighters.find((u) => !u.upgraded);
+  if (plain && fighters.length >= 3 && crystal >= 20) actions.push({ type: "upgrade", targetId: plain.id });
 
   // Surplus energy (crystal is the real bottleneck) buys home turrets.
   const turrets = state.myStructures.filter((x) => x.type === "turret");

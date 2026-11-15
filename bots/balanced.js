@@ -56,16 +56,22 @@ export function onTick(state, memory) {
   } else if (!late && scouts.length < 1 && state.tick >= 15 && energy >= 30) {
     spawn("scout", 30, 0);
   } else if (fighters.length + 0 < state.unitCap && energy >= 60 + reserve && crystal >= 15) {
-    // Bank crystal for armor/weapons once we have a few fighters.
-    const savingFor = fighters.length >= 3 && (!state.upgrades.armor || !state.upgrades.weapons);
-    if (!savingFor || crystal >= 15 + 40) spawn("fighter", 60, 15);
+    // Once we have a few fighters, keep enough crystal to make one of them turret-immune.
+    const savingFor = fighters.length >= 3 && fighters.some((u) => !u.upgraded);
+    if (!savingFor || crystal >= 15 + 20) spawn("fighter", 60, 15);
   }
   if (fighters.length >= 3) {
-    for (const up of ["armor", "weapons"]) {
-      if (!state.upgrades[up] && crystal >= 40) {
-        actions.push({ type: "upgrade", upgrade: up });
-        crystal -= 40;
+    for (const u of fighters) {
+      if (!u.upgraded && crystal >= 20) {
+        actions.push({ type: "upgrade", targetId: u.id });
+        crystal -= 20;
       }
+    }
+  }
+  for (const s of scouts) {
+    if (!s.upgraded && crystal >= 15) {
+      actions.push({ type: "upgrade", targetId: s.id });
+      crystal -= 15;
     }
   }
 

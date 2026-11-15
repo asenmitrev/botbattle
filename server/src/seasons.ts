@@ -27,6 +27,9 @@ export interface SeasonInfo {
 
 const ID_RE = /^\d{8}-\d{6}$/;
 
+/** Bots that finish a season below this Elo (as the leaderboard shows it, rounded) are removed when the next season starts. */
+export const SEASON_MIN_ELO = 1200;
+
 /** Read-only view of one archived season: only the Ladder's query methods are ever used on it. */
 class ArchivedStore extends JsonFileStore {
   override save(): void {
@@ -141,14 +144,16 @@ export class Seasons {
  * - Each bot keeps its code, name, tokens and owner and goes back to 1200 Elo with no games.
  * - Match history and replays start empty.
  * - Botcoin wallets carry over, and open bets are refunded.
- * `minElo`: bots that finished the season below it are left behind. They stay in the archive, code included.
+ * Bots that finished the season below `minElo` (default SEASON_MIN_ELO), judged on the ending season's Elo
+ * before the reset, are left behind: they stay in the archive, code, matches and replays included.
  * The ladder server must be stopped first, or it will overwrite the new ladder.json with its in-memory state.
  */
 export function startNewSeason(
   dataDir: string,
   now: Date = new Date(),
   opts: { minElo?: number } = {},
-): { archive: string; id: string; bots: number; dropped: { name: string; elo: number }[]; refundedBets: number } {
+): { archive: string; id: string; bots: number; minElo: number; dropped: { name: string; elo: number }[]; refundedBets: number } {
+  const minElo = opts.minElo ?? SEASON_MIN_ELO;
   const abs = path.resolve(dataDir);
   const ladderFile = path.join(abs, "ladder.json");
   if (!fs.existsSync(ladderFile)) throw new Error(`no ladder.json in ${abs}`);
@@ -165,7 +170,7 @@ export function startNewSeason(
   const fresh = new JsonFileStore(abs); // creates data/, bots/, replays/
   const oldStore = new JsonFileStore(archive);
   // Compare the Elo the leaderboard shows (rounded): a bot listed at 1200 isn't "below 1200".
-  const keep = (b: BotRecord) => opts.minElo === undefined || Math.round(b.elo) >= opts.minElo;
+  const keep = (b: BotRecord) => Math.round(b.elo) >= minElo;
   const dropped = old.bots.filter((b) => !keep(b)).map((b) => ({ name: b.name, elo: Math.round(b.elo) }));
   const bots: BotRecord[] = old.bots.filter(keep).map((b) => {
     if (!b.house) {
@@ -188,5 +193,5 @@ export function startNewSeason(
   // Counters keep counting, so match ids and seeds never repeat across seasons.
   const data: LadderData = { formatVersion: 1, nextSeed: old.nextSeed, nextMatch: old.nextMatch, bots, matches: [], economy };
   fresh.save(data);
-  return { archive, id: stamp, bots: bots.length, dropped, refundedBets: openBets };
+  return { archive, id: stamp, bots: bots.length, minElo, dropped, refundedBets: openBets };
 }

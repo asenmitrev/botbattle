@@ -111,7 +111,7 @@ describe("movement", () => {
     expect(unit(s2, sc.id)).toMatchObject({ x: 12, y: 10 }); // wall right after
   });
 
-  it.each(["move", "moveTo"] as const)("Scout Speed doubles only the owner's scouts for %s on the purchase tick", (type) => {
+  it.each(["move", "moveTo"] as const)("the scout upgrade doubles only that scout's speed for %s on the purchase tick", (type) => {
     const s = testState();
     const scout = addUnit(s, 1, "scout", 10, 10);
     const worker = addUnit(s, 1, "worker", 10, 12);
@@ -121,7 +121,7 @@ describe("movement", () => {
       ? { type, unitId: id, dir: "E" as const }
       : { type, unitId: id, x: 18, y };
     const { state, events } = step(s, [
-      { type: "upgrade", upgrade: "scoutSpeed" },
+      { type: "upgrade", targetId: scout.id },
       move(scout.id, 10), move(worker.id, 12), move(fighter.id, 14),
     ], [move(enemy.id, 20)]);
     expect(unit(state, scout.id)).toMatchObject({ x: 14, y: 10 });
@@ -129,15 +129,14 @@ describe("movement", () => {
     expect(unit(state, fighter.id)!.x).toBe(11);
     expect(unit(state, enemy.id)!.x).toBe(12);
     expect(invalid(events)).toHaveLength(0);
-    expect(buildBotView(state, 1).upgrades.scoutSpeed).toBe(true);
-    expect(buildBotView(state, 2).upgrades.scoutSpeed).toBe(false);
+    expect(buildBotView(state, 1).myUnits.find((u) => u.id === scout.id)).toMatchObject({ upgraded: true, hp: 10, maxHp: 10 });
+    expect(buildBotView(state, 2).myUnits[0]!.upgraded).toBe(false);
   });
 
   it("upgraded scouts still stop at obstacles and map edges", () => {
     const s = testState({ walls: [[13, 10]] });
-    s.players[0].upgrades.scoutSpeed = true;
-    const scout = addUnit(s, 1, "scout", 10, 10);
-    const edge = addUnit(s, 1, "scout", 38, 20);
+    const scout = addUnit(s, 1, "scout", 10, 10, { upgraded: true });
+    const edge = addUnit(s, 1, "scout", 38, 20, { upgraded: true });
     const { state } = step(s, [
       { type: "move", unitId: scout.id, dir: "E" },
       { type: "move", unitId: edge.id, dir: "E" },
@@ -148,8 +147,7 @@ describe("movement", () => {
 
   it("upgraded scouts stop at occupied tiles on later sub-steps", () => {
     const s = testState();
-    s.players[0].upgrades.scoutSpeed = true;
-    const scout = addUnit(s, 1, "scout", 10, 10);
+    const scout = addUnit(s, 1, "scout", 10, 10, { upgraded: true });
     addUnit(s, 2, "worker", 13, 10);
     const { state } = step(s, [{ type: "move", unitId: scout.id, dir: "E" }], []);
     expect(unit(state, scout.id)).toMatchObject({ x: 12, y: 10 });
@@ -157,8 +155,7 @@ describe("movement", () => {
 
   it("upgraded moveTo stops at its target without overshooting", () => {
     const s = testState();
-    s.players[0].upgrades.scoutSpeed = true;
-    const scout = addUnit(s, 1, "scout", 10, 10);
+    const scout = addUnit(s, 1, "scout", 10, 10, { upgraded: true });
     const { state } = step(s, [{ type: "moveTo", unitId: scout.id, x: 12, y: 10 }], []);
     expect(unit(state, scout.id)).toMatchObject({ x: 12, y: 10 });
   });
@@ -247,37 +244,96 @@ describe("spawning and upgrades", () => {
     expect(invalid(step(boxed, [{ type: "spawn", unit: "worker" }], []).events)[0]).toMatchObject({ reason: "no free tile next to base" });
   });
 
-  it("upgrades cost crystal and can be bought once", () => {
+  it("upgrades are per unit, cost per type, and can be bought once per unit", () => {
     const s = testState();
-    const r1 = step(s, [{ type: "upgrade", upgrade: "armor" }, { type: "upgrade", upgrade: "cargo" }], []);
-    expect(r1.state.players[0].upgrades).toMatchObject({ armor: true, cargo: true, weapons: false });
-    expect(r1.state.players[0].crystal).toBe(1000 - 40 - 30);
-    const r2 = step(r1.state, [{ type: "upgrade", upgrade: "armor" }], []);
-    expect(invalid(r2.events)[0]).toMatchObject({ reason: "already purchased" });
-  });
-
-  it.each([14, 15])("Scout Speed requires 15 crystals with %i available", (crystal) => {
-    const s = testState();
-    s.players[0].crystal = crystal;
-    const { state, events } = step(s, [{ type: "upgrade", upgrade: "scoutSpeed" }], []);
-    expect(state.players[0].upgrades.scoutSpeed).toBe(crystal === 15);
-    expect(state.players[0].crystal).toBe(crystal === 15 ? 0 : crystal);
-    expect(state.players[0].energy).toBe(1000);
-    expect(invalid(events)).toHaveLength(crystal === 15 ? 0 : 1);
-  });
-
-  it("Scout Speed cannot be repurchased and applies to future scouts", () => {
-    const s = testState();
-    const purchased = step(s, [{ type: "upgrade", upgrade: "scoutSpeed" }], []).state;
-    const { state: spawned, events } = step(purchased, [
-      { type: "upgrade", upgrade: "scoutSpeed" },
-      { type: "spawn", unit: "scout" },
+    const scout = addUnit(s, 1, "scout", 10, 10);
+    const other = addUnit(s, 1, "scout", 10, 12);
+    const fighter = addUnit(s, 1, "fighter", 10, 14);
+    s.structures.push({ id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 60 });
+    const r1 = step(s, [
+      { type: "upgrade", targetId: scout.id },
+      { type: "upgrade", targetId: fighter.id },
+      { type: "upgrade", targetId: 50 },
     ], []);
-    expect(spawned.players[0].crystal).toBe(985);
-    expect(invalid(events)[0]).toMatchObject({ reason: "already purchased" });
+    expect(invalid(r1.events)).toHaveLength(0);
+    expect(r1.state.players[0].crystal).toBe(1000 - 15 - 20);
+    expect(r1.state.players[0].energy).toBe(1000 - 50);
+    expect(unit(r1.state, scout.id)).toMatchObject({ upgraded: true, hp: 10 });
+    expect(unit(r1.state, other.id)!.upgraded).toBeFalsy();
+    expect(unit(r1.state, fighter.id)).toMatchObject({ upgraded: true, hp: 30 });
+    expect(r1.state.structures[0]).toMatchObject({ upgraded: true, hp: 120 });
+    expect(r1.events).toContainEqual({ type: "upgrade", player: 1, targetId: scout.id, upgrade: "scout" });
+    const r2 = step(r1.state, [{ type: "upgrade", targetId: scout.id }], []);
+    expect(invalid(r2.events)[0]).toMatchObject({ reason: "already upgraded" });
+  });
+
+  it("upgrading a damaged entity adds the extra max HP", () => {
+    const s = testState();
+    const scout = addUnit(s, 1, "scout", 10, 10, { hp: 2 });
+    s.structures.push({ id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 10 });
+    const { state } = step(s, [{ type: "upgrade", targetId: scout.id }, { type: "upgrade", targetId: 50 }], []);
+    expect(unit(state, scout.id)!.hp).toBe(7);
+    expect(state.structures[0]!.hp).toBe(70);
+  });
+
+  it("rejects upgrades for other types, enemy entities, missing targets and duplicates", () => {
+    const s = testState();
+    const worker = addUnit(s, 1, "worker", 10, 10);
+    const scout = addUnit(s, 1, "scout", 10, 12);
+    const enemy = addUnit(s, 2, "scout", 30, 30);
+    s.structures.push({ id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
+    const { events } = step(s, [
+      { type: "upgrade", targetId: worker.id },
+      { type: "upgrade", targetId: 50 },
+      { type: "upgrade", targetId: enemy.id },
+      { type: "upgrade", targetId: 99999 },
+      { type: "upgrade" },
+      { type: "upgrade", targetId: scout.id },
+      { type: "upgrade", targetId: scout.id },
+    ], []);
+    expect(invalid(events).map((e) => e.type === "invalid_action" && e.reason)).toEqual([
+      "missing targetId",
+      "duplicate upgrade",
+      "worker has no upgrade",
+      "turret has no upgrade",
+      "no such unit or structure (or not yours)",
+      "no such unit or structure (or not yours)",
+    ]);
+  });
+
+  it.each([
+    ["scout", 14, 15, "crystal"],
+    ["fighter", 19, 20, "crystal"],
+  ] as const)("%s upgrade requires exactly its cost (%i fails, %i succeeds)", (type, low, ok, res) => {
+    for (const amount of [low, ok]) {
+      const s = testState();
+      s.players[0][res] = amount;
+      const u = addUnit(s, 1, type, 10, 10);
+      const { state, events } = step(s, [{ type: "upgrade", targetId: u.id }], []);
+      expect(!!unit(state, u.id)!.upgraded).toBe(amount === ok);
+      expect(state.players[0][res]).toBe(amount === ok ? 0 : amount);
+      if (amount !== ok) expect(invalid(events)[0]).toMatchObject({ reason: "not enough resources" });
+    }
+  });
+
+  it("wall upgrade costs 50 energy", () => {
+    for (const energy of [49, 50]) {
+      const s = testState();
+      s.players[0].energy = energy;
+      s.structures.push({ id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 60 });
+      const { state } = step(s, [{ type: "upgrade", targetId: 50 }], []);
+      expect(state.structures[0]).toMatchObject({ hp: energy === 50 ? 120 : 60 });
+      expect(state.players[0].energy).toBe(energy === 50 ? 0 : 49);
+    }
+  });
+
+  it("newly spawned scouts are not upgraded", () => {
+    const s = testState();
+    const { state: spawned } = step(s, [{ type: "spawn", unit: "scout" }], []);
     const scout = spawned.units[0]!;
+    expect(scout.upgraded).toBe(false);
     const { state } = step(spawned, [{ type: "move", unitId: scout.id, dir: "E" }], []);
-    expect(unit(state, scout.id)!.x).toBe(scout.x + 4);
+    expect(unit(state, scout.id)!.x).toBe(scout.x + 2);
   });
 });
 
@@ -293,17 +349,6 @@ describe("harvest, deposit, build", () => {
     const r = step(st, [{ type: "deposit", unitId: w.id }], []);
     expect(r.state.players[0].energy).toBe(1020);
     expect(unit(r.state, w.id)!.cargo.energy).toBe(0);
-  });
-
-  it("cargo upgrade raises capacity to 30", () => {
-    const s = testState();
-    s.players[0].upgrades.cargo = true;
-    const n = addNode(s, "crystal", 6, 6);
-    const w = addUnit(s, 1, "worker", 5, 5);
-    let st = s;
-    for (let i = 0; i < 8; i++) st = step(st, [{ type: "harvest", unitId: w.id, nodeId: n.id }], []).state;
-    expect(unit(st, w.id)!.cargo.crystal).toBe(30);
-    expect(st.nodes[0]!.amount).toBe(170); // crystal does not regenerate
   });
 
   it("rejects harvest when not adjacent and deposit away from base; only workers carry", () => {
@@ -339,20 +384,20 @@ describe("harvest, deposit, build", () => {
       { type: "build", unitId: w2.id, structure: "wall", x: 21, y: 20 },
     ], []);
     expect(state.structures.map((x) => [x.type, x.x, x.y, x.hp])).toEqual([["turret", 9, 9, 50], ["wall", 21, 20, 60]]);
-    expect(state.players[0].energy).toBe(1000 - 100 - 5);
+    expect(state.players[0].energy).toBe(1000 - 100 - 3);
     expect(invalid(events)).toHaveLength(0);
   });
 
-  it.each([4, 5])("checks wall affordability with %i energy", (energy) => {
+  it.each([2, 3])("checks wall affordability with %i energy", (energy) => {
     const s = testState();
     s.players[0].energy = energy;
     const w = addUnit(s, 1, "worker", 10, 10);
     const { state, events } = step(s, [
       { type: "build", unitId: w.id, structure: "wall", x: 11, y: 10 },
     ], []);
-    expect(state.structures).toHaveLength(energy === 5 ? 1 : 0);
-    expect(state.players[0].energy).toBe(energy === 5 ? 0 : energy);
-    expect(invalid(events)).toHaveLength(energy === 5 ? 0 : 1);
+    expect(state.structures).toHaveLength(energy === 3 ? 1 : 0);
+    expect(state.players[0].energy).toBe(energy === 3 ? 0 : energy);
+    expect(invalid(events)).toHaveLength(energy === 3 ? 0 : 1);
   });
 
   it("turrets must be within 8 tiles of own base", () => {
@@ -418,18 +463,32 @@ describe("combat", () => {
     expect(invalid(r2.events)[0]).toMatchObject({ reason: "target out of range" });
   });
 
-  it("armor reduces damage taken by units (min 1); weapons boost fighters", () => {
+  it("upgraded fighters take normal damage from units", () => {
     const s = testState();
-    s.players[1].upgrades.armor = true;
-    s.players[0].upgrades.weapons = true;
     const a = addUnit(s, 1, "fighter", 20, 20);
-    const b = addUnit(s, 2, "fighter", 21, 20);
+    const b = addUnit(s, 2, "fighter", 21, 20, { upgraded: true });
     const { state } = step(s, [{ type: "attack", unitId: a.id, targetId: b.id }], [{ type: "attack", unitId: b.id, targetId: a.id }]);
-    expect(unit(state, b.id)!.hp).toBe(30 - (6 + 3 - 2));
-    expect(unit(state, a.id)!.hp).toBe(30 - 6);
+    expect(unit(state, b.id)!.hp).toBe(24);
+    expect(unit(state, a.id)!.hp).toBe(24);
   });
 
-  it("turrets hit the lowest-HP enemy in range, ties to lowest ID; armor applies", () => {
+  it("turrets ignore upgraded fighters and shoot the next valid target", () => {
+    const s = testState();
+    s.structures.push({ id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
+    const immune = addUnit(s, 2, "fighter", 9, 8, { hp: 1, upgraded: true });
+    const plain = addUnit(s, 2, "fighter", 10, 8, { hp: 20 });
+    const { state } = step(s, [], []);
+    expect(unit(state, immune.id)!.hp).toBe(1);
+    expect(unit(state, plain.id)!.hp).toBe(16);
+    const alone = testState();
+    alone.structures.push({ id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
+    const only = addUnit(alone, 2, "fighter", 9, 8, { upgraded: true });
+    const r = step(alone, [], []);
+    expect(unit(r.state, only.id)!.hp).toBe(30);
+    expect(r.events.filter((e) => e.type === "attack")).toHaveLength(0);
+  });
+
+  it("turrets hit the lowest-HP enemy in range, ties to lowest ID", () => {
     const s = testState();
     s.structures.push({ id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
     const far = addUnit(s, 2, "worker", 13, 8, { hp: 1 }); // range 5: out
@@ -548,10 +607,9 @@ describe("zone", () => {
     expect(zoneRadius(499)).toBe(3);
   });
 
-  it("damages units and structures outside, never bases, ignores armor", () => {
+  it("damages units and structures outside, never bases, including upgraded fighters", () => {
     const s = testState({ tick: 432 }); // radius 19
-    s.players[0].upgrades.armor = true;
-    const out = addUnit(s, 1, "fighter", 2, 2);
+    const out = addUnit(s, 1, "fighter", 2, 2, { upgraded: true });
     const inside = addUnit(s, 1, "fighter", 20, 20);
     s.structures.push({ id: 60, owner: 2, type: "wall", x: 38, y: 38, hp: 40 });
     const { state } = step(s, [], []);
@@ -576,7 +634,7 @@ describe("validation and robustness", () => {
       { type: "moveTo", unitId: u.id, x: 1.5, y: 5 },
       { type: "build", unitId: u.id, structure: "castle", x: 11, y: 10 },
       { type: "spawn", unit: "dragon" },
-      { type: "upgrade", upgrade: "laser" },
+      { type: "upgrade", targetId: "laser" },
       { type: "mark", x: 1e9, y: 0 },
       { type: "harvest", unitId: u.id, nodeId: "x" },
       { type: "attack", unitId: u.id },
@@ -623,7 +681,6 @@ describe("validation and robustness", () => {
           targetId: Math.floor(rnd() * 200),
           structure: rnd() < 0.5 ? "turret" : "wall",
           unit: ["worker", "fighter", "scout"][Math.floor(rnd() * 3)],
-          upgrade: ["cargo", "armor", "weapons", "scoutSpeed"][Math.floor(rnd() * 4)],
           text: "t",
         }));
       s = step(s, mk(), mk()).state;

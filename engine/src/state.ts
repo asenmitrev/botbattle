@@ -1,4 +1,4 @@
-import { CONFIG, type UnitType } from "./config.js";
+import { CONFIG, type StructureType, type UnitType } from "./config.js";
 import { ADJ8, inBounds } from "./geometry.js";
 import { generateMap } from "./map.js";
 import { TILE, type Base, type GameState, type PlayerId, type PlayerState, type Pos, type Unit } from "./types.js";
@@ -22,7 +22,6 @@ export function createInitialState(seed: number): GameState {
     id,
     energy: CONFIG.match.startEnergy,
     crystal: CONFIG.match.startCrystal,
-    upgrades: { cargo: false, armor: false, weapons: false, scoutSpeed: false },
   });
 
   const state: GameState = {
@@ -49,7 +48,7 @@ export function createInitialState(seed: number): GameState {
 }
 
 export function makeUnit(state: GameState, owner: PlayerId, type: UnitType, pos: Pos): Unit {
-  return { id: state.nextId++, owner, type, x: pos.x, y: pos.y, hp: CONFIG.units[type].hp, cargo: { energy: 0, crystal: 0 } };
+  return { id: state.nextId++, owner, type, x: pos.x, y: pos.y, hp: CONFIG.units[type].hp, cargo: { energy: 0, crystal: 0 }, upgraded: false };
 }
 
 /** Occupancy grid: 1 for every tile blocked by terrain, nodes, bases, structures or units. */
@@ -90,8 +89,8 @@ export function cloneState(s: GameState): GameState {
     nodes: s.nodes.map((n) => ({ ...n })),
     bases: s.bases.map((b) => ({ ...b })),
     players: [
-      { ...s.players[0], upgrades: { ...s.players[0].upgrades } },
-      { ...s.players[1], upgrades: { ...s.players[1].upgrades } },
+      { ...s.players[0] },
+      { ...s.players[1] },
     ],
     units: s.units.map((u) => ({ ...u, cargo: { ...u.cargo } })),
     structures: s.structures.map((x) => ({ ...x })),
@@ -102,17 +101,23 @@ export function cloneState(s: GameState): GameState {
   };
 }
 
-export function cargoCapacity(state: GameState, owner: PlayerId, type: UnitType): number {
-  const base = CONFIG.units[type].carry;
-  if (base === 0) return 0;
-  return base + (state.players[owner - 1]!.upgrades.cargo ? CONFIG.upgrades.cargo.cargoBonus : 0);
+export function cargoCapacity(type: UnitType): number {
+  return CONFIG.units[type].carry;
 }
 
-export function unitSpeed(state: GameState, owner: PlayerId, type: UnitType): number {
-  const speed = CONFIG.units[type].speed;
-  return type === "scout" && state.players[owner - 1]!.upgrades.scoutSpeed
-    ? speed * CONFIG.upgrades.scoutSpeed.speedMultiplier
-    : speed;
+export function unitSpeed(u: { type: UnitType; upgraded?: boolean }): number {
+  const speed = CONFIG.units[u.type].speed;
+  return u.type === "scout" && u.upgraded ? speed * CONFIG.upgrades.scout.speedMultiplier : speed;
+}
+
+/** Max HP of a unit or structure, including its upgrade. */
+export function maxHp(e: { type: UnitType | StructureType; upgraded?: boolean }): number {
+  if (e.type === "scout" || e.type === "fighter" || e.type === "worker") {
+    const hp = CONFIG.units[e.type].hp;
+    return e.type === "scout" && e.upgraded ? hp * CONFIG.upgrades.scout.hpMultiplier : hp;
+  }
+  const hp = CONFIG.structures[e.type].hp;
+  return e.type === "wall" && e.upgraded ? hp * CONFIG.upgrades.wall.hpMultiplier : hp;
 }
 
 export function unitValue(type: UnitType): number {

@@ -1,7 +1,7 @@
 import { CONFIG, type NodeType, type StructureType, type UnitType } from "./config.js";
 import { dist2 } from "./geometry.js";
-import { cargoCapacity, zoneCenter, zoneRadius } from "./state.js";
-import { TILE, type GameState, type PlayerId, type Pos, type TileType, type Upgrades } from "./types.js";
+import { cargoCapacity, maxHp, zoneCenter, zoneRadius } from "./state.js";
+import { TILE, type GameState, type PlayerId, type Pos, type TileType } from "./types.js";
 
 /** Visibility grid for a player: 1 = visible. Vision is a Euclidean circle; no line of sight. */
 export function computeVisibility(state: GameState, player: PlayerId): Uint8Array {
@@ -33,6 +33,7 @@ export interface BotUnit {
   maxHp: number;
   cargo: { energy: number; crystal: number };
   cargoCapacity: number;
+  upgraded: boolean;
 }
 
 export interface BotStructure {
@@ -41,11 +42,13 @@ export interface BotStructure {
   x: number;
   y: number;
   hp: number;
+  maxHp: number;
+  upgraded: boolean;
 }
 
 export type BotEnemy =
-  | { id: number; kind: "unit"; type: UnitType; x: number; y: number; hp: number }
-  | { id: number; kind: "structure"; type: StructureType; x: number; y: number; hp: number }
+  | { id: number; kind: "unit"; type: UnitType; x: number; y: number; hp: number; upgraded: boolean }
+  | { id: number; kind: "structure"; type: StructureType; x: number; y: number; hp: number; upgraded: boolean }
   | { id: number; kind: "base"; type: "base"; x: number; y: number; hp: number };
 
 export interface BotNode {
@@ -72,7 +75,6 @@ export interface BotState {
   myStructures: BotStructure[];
   energy: number;
   crystal: number;
-  upgrades: Upgrades;
   visibleEnemies: BotEnemy[];
   visibleNodes: BotNode[];
   visibleTiles: BotTile[];
@@ -104,10 +106,10 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
     if (b.owner !== player && b.hp > 0 && seen(b)) visibleEnemies.push({ id: b.id, kind: "base", type: "base", x: b.x, y: b.y, hp: b.hp });
   }
   for (const u of state.units) {
-    if (u.owner !== player && seen(u)) visibleEnemies.push({ id: u.id, kind: "unit", type: u.type, x: u.x, y: u.y, hp: u.hp });
+    if (u.owner !== player && seen(u)) visibleEnemies.push({ id: u.id, kind: "unit", type: u.type, x: u.x, y: u.y, hp: u.hp, upgraded: !!u.upgraded });
   }
   for (const s of state.structures) {
-    if (s.owner !== player && seen(s)) visibleEnemies.push({ id: s.id, kind: "structure", type: s.type, x: s.x, y: s.y, hp: s.hp });
+    if (s.owner !== player && seen(s)) visibleEnemies.push({ id: s.id, kind: "structure", type: s.type, x: s.x, y: s.y, hp: s.hp, upgraded: !!s.upgraded });
   }
   visibleEnemies.sort((a, b) => a.id - b.id);
 
@@ -133,14 +135,16 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
         x: u.x,
         y: u.y,
         hp: u.hp,
-        maxHp: CONFIG.units[u.type].hp,
+        maxHp: maxHp(u),
         cargo: { ...u.cargo },
-        cargoCapacity: cargoCapacity(state, player, u.type),
+        cargoCapacity: cargoCapacity(u.type),
+        upgraded: !!u.upgraded,
       })),
-    myStructures: state.structures.filter((s) => s.owner === player).map((s) => ({ id: s.id, type: s.type, x: s.x, y: s.y, hp: s.hp })),
+    myStructures: state.structures
+      .filter((s) => s.owner === player)
+      .map((s) => ({ id: s.id, type: s.type, x: s.x, y: s.y, hp: s.hp, maxHp: maxHp(s), upgraded: !!s.upgraded })),
     energy: me.energy,
     crystal: me.crystal,
-    upgrades: { ...me.upgrades },
     visibleEnemies,
     visibleNodes: state.nodes.filter(seen).map((n) => ({ id: n.id, type: n.type, x: n.x, y: n.y, amount: n.amount })),
     visibleTiles,

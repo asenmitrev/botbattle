@@ -1,4 +1,4 @@
-import { CONFIG, computeVisibility, TILE, zoneCenter, zoneRadius, type GameEvent, type GameState, type PlayerId } from "@arena/engine";
+import { CONFIG, computeVisibility, maxHp, TILE, zoneCenter, zoneRadius, type GameEvent, type GameState, type PlayerId } from "@arena/engine";
 import { onSpriteLoad, sprite, tintedSprite, type SpriteName } from "./sprites.js";
 
 export const COLORS = {
@@ -208,7 +208,8 @@ export class BoardRenderer {
           ctx.globalAlpha = 1;
         }
       }
-      this.hpBar(x + c * 0.1, y - c * 0.05, c * 0.8, s.hp / CONFIG.structures[s.type].hp, true);
+      if (s.upgraded) this.upgradeBadge(x + c * 0.82, y + c * 0.18, c);
+      this.hpBar(x + c * 0.1, y - c * 0.05, c * 0.8, s.hp / maxHp(s), true);
     }
 
     // Units
@@ -257,7 +258,8 @@ export class BoardRenderer {
         ctx.fill();
         ctx.stroke();
       }
-      const max = CONFIG.units[u.type].hp;
+      if (u.upgraded) this.upgradeBadge(cx - c * 0.3, cy - c * 0.3, c);
+      const max = maxHp(u);
       if (u.hp < max) this.hpBar(u.x * c + c * 0.1, u.y * c - c * 0.02, c * 0.8, u.hp / max, true);
     }
 
@@ -341,6 +343,23 @@ export class BoardRenderer {
     this.ctx.fillRect(x, y, w, h);
     this.ctx.fillStyle = frac > 0.35 ? COLORS.hpGood : COLORS.hpLow;
     this.ctx.fillRect(x, y, w * Math.max(0, Math.min(1, frac)), h);
+  }
+
+  /** Small gold chevron marking an upgraded unit or wall. */
+  private upgradeBadge(x: number, y: number, c: number): void {
+    const { ctx } = this;
+    const r = Math.max(2.5, c * 0.16);
+    ctx.fillStyle = "#f2b84b";
+    ctx.strokeStyle = "rgba(0,0,0,0.75)";
+    ctx.lineWidth = Math.max(1, c * 0.04);
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r, y + r * 0.6);
+    ctx.lineTo(x, y + r * 0.1);
+    ctx.lineTo(x - r, y + r * 0.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
   }
 
   private label(text: string, x: number, y: number, px: number, color: string, halo = false): void {

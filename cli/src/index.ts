@@ -243,7 +243,7 @@ async function cmdNewSeason(args: Args): Promise<void> {
   if (minElo !== undefined && !Number.isFinite(minElo)) throw new Error("--min-elo must be a number");
   const r = startNewSeason(dir, new Date(), { minElo });
   console.log(`New season: archived ${dir} as ${r.archive}; ${r.bots} bots carried over at 1200 Elo; ${r.refundedBets} open bet(s) refunded.`);
-  if (r.dropped.length) console.log(`Left behind (below ${minElo} Elo): ${r.dropped.map((d) => `${d.name} (${d.elo})`).join(", ")}`);
+  if (r.dropped.length) console.log(`Left behind (below ${r.minElo} Elo): ${r.dropped.map((d) => `${d.name} (${d.elo})`).join(", ")}`);
 }
 
 async function main(): Promise<void> {

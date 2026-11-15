@@ -1,7 +1,7 @@
 // Single source of game constants. RULES.md must stay in sync with this file.
 // Bump CONFIG_VERSION whenever any value below changes (replays record it).
 
-export const CONFIG_VERSION = "1.9.0";
+export const CONFIG_VERSION = "2.0.0";
 
 export const CONFIG = {
   map: {
@@ -42,7 +42,7 @@ export const CONFIG = {
 
   structures: {
     turret: { costEnergy: 100, costCrystal: 0, hp: 50, damage: 4, range: 4, vision: 4, maxDistFromBase: 8 },
-    wall: { costEnergy: 5, costCrystal: 0, hp: 60, damage: 0, range: 0, vision: 0, maxDistFromBase: Infinity },
+    wall: { costEnergy: 3, costCrystal: 0, hp: 60, damage: 0, range: 0, vision: 0, maxDistFromBase: Infinity },
   },
 
   nodes: {
@@ -50,11 +50,14 @@ export const CONFIG = {
     crystal: { amount: 200, max: 200, regen: 0 },
   },
 
+  /** Per-entity upgrades, keyed by the unit/structure type they apply to. Each entity can be upgraded once. */
   upgrades: {
-    cargo: { costCrystal: 30, cargoBonus: 10 },
-    armor: { costCrystal: 40, damageReduction: 2, minDamage: 1 },
-    weapons: { costCrystal: 40, fighterDamageBonus: 3 },
-    scoutSpeed: { costCrystal: 15, speedMultiplier: 2 },
+    /** Doubles the scout's speed and max HP. */
+    scout: { costEnergy: 0, costCrystal: 15, speedMultiplier: 2, hpMultiplier: 2 },
+    /** Doubles the wall's max HP. */
+    wall: { costEnergy: 50, costCrystal: 0, hpMultiplier: 2 },
+    /** Turrets ignore the fighter (no turret damage). */
+    fighter: { costEnergy: 0, costCrystal: 20 },
   },
 
   zone: {
@@ -115,4 +118,5 @@ export type NodeType = keyof Config["nodes"];
 export const UNIT_TYPES: readonly UnitType[] = ["worker", "fighter", "scout"];
 export const STRUCTURE_TYPES: readonly StructureType[] = ["turret", "wall"];
 export const BUILD_TYPES: readonly BuildType[] = [...STRUCTURE_TYPES, "base"];
-export const UPGRADE_TYPES: readonly UpgradeType[] = ["cargo", "armor", "weapons", "scoutSpeed"];
+/** Unit/structure types that have an upgrade. */
+export const UPGRADE_TYPES: readonly UpgradeType[] = ["scout", "wall", "fighter"];
