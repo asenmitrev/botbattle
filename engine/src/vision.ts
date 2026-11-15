@@ -75,6 +75,11 @@ export interface BotState {
   myStructures: BotStructure[];
   energy: number;
   crystal: number;
+  /**
+   * @deprecated Always all false: the global upgrades were replaced by per-unit ones in config 2.0.0
+   * (see `upgraded` on units and structures). Kept so bots written for the old API don't crash.
+   */
+  upgrades: { cargo: false; armor: false; weapons: false; scoutSpeed: false };
   visibleEnemies: BotEnemy[];
   visibleNodes: BotNode[];
   visibleTiles: BotTile[];
@@ -145,6 +150,7 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
       .map((s) => ({ id: s.id, type: s.type, x: s.x, y: s.y, hp: s.hp, maxHp: maxHp(s), upgraded: !!s.upgraded })),
     energy: me.energy,
     crystal: me.crystal,
+    upgrades: { cargo: false, armor: false, weapons: false, scoutSpeed: false },
     visibleEnemies,
     visibleNodes: state.nodes.filter(seen).map((n) => ({ id: n.id, type: n.type, x: n.x, y: n.y, amount: n.amount })),
     visibleTiles,

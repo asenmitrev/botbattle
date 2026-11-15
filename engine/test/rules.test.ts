@@ -212,6 +212,16 @@ describe("movement", () => {
 });
 
 describe("spawning and upgrades", () => {
+  it("keeps the old global `upgrades` field (all false) so bots written for config 1.x don't crash", () => {
+    const s = testState();
+    const view = buildBotView(s, 1);
+    expect(view.upgrades).toEqual({ cargo: false, armor: false, weapons: false, scoutSpeed: false });
+    // An old-style upgrade action is rejected as invalid; it isn't a bot error.
+    const { events } = step(s, [{ type: "upgrade", upgrade: "armor" }], []);
+    expect(invalid(events)).toHaveLength(1);
+    expect(events.some((e) => e.type === "bot_error")).toBe(false);
+  });
+
   it("spawns next to base, deducts cost, one per tick", () => {
     const s = testState();
     const { state, events } = step(s, [{ type: "spawn", unit: "fighter" }, { type: "spawn", unit: "worker" }], []);

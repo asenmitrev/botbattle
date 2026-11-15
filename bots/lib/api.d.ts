@@ -60,6 +60,8 @@ export interface BotState {
   myStructures: MyStructure[];
   energy: number;
   crystal: number;
+  /** @deprecated Always all false since per-unit upgrades (config 2.0.0); use `upgraded` on units/structures. */
+  upgrades: { cargo: false; armor: false; weapons: false; scoutSpeed: false };
   visibleEnemies: Enemy[];
   visibleNodes: VisibleNode[];
   visibleTiles: VisibleTile[];
