@@ -533,14 +533,14 @@ export async function initLadder(hooks: Hooks): Promise<void> {
       return;
     }
     box.innerHTML =
-      `<h4>${esc(name)}: recent matches <span class="muted">(click to watch)</span>${del}</h4>${coins}` +
+      `<h4>${esc(name)}: recent matches <span class="muted">${season ? "(replays aren't kept for past seasons)" : "(click to watch)"}</span>${del}</h4>${coins}` +
       ms
         .map((m) => {
           const side = m.p1.id === botId ? 1 : 2;
           const self = side === 1 ? m.p1 : m.p2;
           const res = m.winner === "draw" ? "draw" : m.winner === side ? "win" : "loss";
           const d = Math.round(self.eloAfter - self.eloBefore);
-          return `<div class="match-row" data-match="${esc(m.id)}">
+          return `<div class="match-row${season ? " static" : ""}"${season ? "" : ` data-match="${esc(m.id)}"`}>
             <span class="res ${res}">${res.toUpperCase()}</span>
             <span><span class="p1">${esc(m.p1.name)}</span> ${m.p1.score} : ${m.p2.score} <span class="p2">${esc(m.p2.name)}</span>
               <span class="muted"> · ${esc(m.reason.replace("_", " "))} · seed ${m.seed}</span></span>
@@ -671,7 +671,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     if (!p) return;
     const num = seasonNumber(season);
     const head = `<div class="playoff-head"><strong>🏆 Season ${num ?? ""} playoff</strong>
-      <span class="muted">top ${p.entrants.length} · ${p.gamesPerSeries} games per matchup · click a game to watch</span>
+      <span class="muted">top ${p.entrants.length} · ${p.gamesPerSeries} games per matchup · ${p.seasonId ? "replays aren't kept for past seasons" : "click a game to watch"}</span>
       ${p.status === "running" ? `<span class="live">● live</span>` : ""}
       ${p.status === "failed" ? `<span class="down" style="color:var(--danger)">failed: ${esc(p.error ?? "unknown error")}. The season was not ended.</span>` : ""}</div>`;
     const champ = p.champion && p.status === "done"
@@ -701,7 +701,10 @@ export async function initLadder(hooks: Hooks): Promise<void> {
         const who = winnerId === s.a.id ? "a" : winnerId === s.b.id ? "b" : "d";
         const name = (id: string) => (id === s.a!.id ? s.a!.name : s.b!.name);
         const title = `Game ${g + 1}: ${name(game.p1)} ${game.scores[0]} : ${game.scores[1]} ${name(game.p2)} · ${game.reason.replace("_", " ")}${winnerId ? ` · ${name(winnerId)} wins` : " · draw"}`;
-        pips += `<button class="pip ${who}" data-pgame="${esc(game.id)}" title="${esc(title)}">${who === "d" ? "=" : g + 1}</button>`;
+        // Archived playoffs (seasonId set) have no replays: show the result without a link.
+        pips += p.seasonId
+          ? `<span class="pip ${who}" title="${esc(title)}">${who === "d" ? "=" : g + 1}</span>`
+          : `<button class="pip ${who}" data-pgame="${esc(game.id)}" title="${esc(title)}">${who === "d" ? "=" : g + 1}</button>`;
       }
     }
     return `<div class="series ${s.status}">${line(s.a, s.aWins, "top")}${line(s.b, s.bWins, "bot")}${pips ? `<div class="pips">${pips}</div>` : ""}</div>`;

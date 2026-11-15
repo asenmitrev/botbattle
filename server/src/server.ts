@@ -121,7 +121,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     m = /^matches\/([A-Za-z0-9_-]+)\/replay$/.exec(rest);
     if (m) {
       const replay = s.store.loadReplay(m[1]!);
-      return replay ? json(res, 200, replay) : json(res, 404, { error: "no such replay" });
+      return replay ? json(res, 200, replay) : json(res, 404, { error: "replays aren't kept for past seasons" });
     }
     return json(res, 404, { error: "not found" });
   }

@@ -93,6 +93,7 @@ describe("startNewSeason", () => {
     expect(r).toMatchObject({ archive: `${dir}-backup-20261113-150405`, bots: 2, refundedBets: 1, dropped: [{ name: "loser", elo: 1199 }] });
     // The archive is the old ladder, untouched.
     expect(JSON.parse(fs.readFileSync(path.join(r.archive, "ladder.json"), "utf8")).bots[0].elo).toBe(1500);
+    expect(fs.existsSync(path.join(r.archive, "replays"))).toBe(false); // past seasons keep scores, not replays
     const fresh = new Ladder(new JsonFileStore(dir));
     const b = fresh.bot(bot.id)!;
     expect(b).toMatchObject({ name: "keeper", elo: 1200, games: 0, wins: 0, highScore: null, version: 1 });

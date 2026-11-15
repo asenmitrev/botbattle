@@ -44,7 +44,7 @@ describe("ending a season from the server", () => {
     });
     for (const b of srv.ladder.data.bots) srv.scheduler.enqueuePlacement(b.id);
     await srv.scheduler.whenIdle();
-  });
+  }, 120_000); // placement games take longer than the default 10 s hook timeout on a busy machine
   afterAll(async () => {
     await srv.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -82,15 +82,14 @@ describe("ending a season from the server", () => {
     const final = p.rounds[1][0];
     expect(p.champion.id).toBe(final.winner);
 
-    // Archived with its replays; the new season starts at 1200 with no games.
+    // Archived without its replays; the new season starts at 1200 with no games.
     const seasons = (await api("GET", "/api/seasons")).body;
     expect(seasons).toHaveLength(1);
     expect(seasons[0].id).toBe(p.seasonId);
     expect(seasons[0].champion).toMatchObject({ name: p.champion.name, playoff: true });
     expect((await api("GET", `/api/seasons/${p.seasonId}/playoff`)).body.champion.id).toBe(p.champion.id);
     const replay = await api("GET", `/api/seasons/${p.seasonId}/matches/${final.games[0].id}/replay`);
-    expect(replay.status).toBe(200);
-    expect(replay.body.bots).toEqual([final.a.name, final.b.name]);
+    expect(replay.status).toBe(404);
     const lb = (await api("GET", "/api/leaderboard")).body;
     expect(lb).toHaveLength(3);
     expect(lb.every((x: any) => x.elo === 1200 && x.games === 0)).toBe(true);

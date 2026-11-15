@@ -139,13 +139,14 @@ export class Seasons {
 
 /**
  * Start a new season. The data dir is renamed to `<data>-backup-YYYYMMDD-HHMMSS` (local time, which is how
- * Seasons reads it), so nothing is copied and old replays stay with the archive. A fresh data dir is then
+ * Seasons reads it), so nothing is copied. Past seasons keep their scores (ladder.json, playoff.json) but not
+ * their replays, which are deleted from the archive (they are most of its size). A fresh data dir is then
  * written with every bot carried over:
  * - Each bot keeps its code, name, tokens and owner and goes back to 1200 Elo with no games.
  * - Match history and replays start empty.
  * - Botcoin wallets carry over, and open bets are refunded.
  * Bots that finished the season below `minElo` (default SEASON_MIN_ELO), judged on the ending season's Elo
- * before the reset, are left behind: they stay in the archive, code, matches and replays included.
+ * before the reset, are left behind: they stay in the archive, code and matches included.
  * The ladder server must be stopped first, or it will overwrite the new ladder.json with its in-memory state.
  */
 export function startNewSeason(
@@ -193,5 +194,6 @@ export function startNewSeason(
   // Counters keep counting, so match ids and seeds never repeat across seasons.
   const data: LadderData = { formatVersion: 1, nextSeed: old.nextSeed, nextMatch: old.nextMatch, bots, matches: [], economy };
   fresh.save(data);
+  fs.rmSync(path.join(archive, "replays"), { recursive: true, force: true });
   return { archive, id: stamp, bots: bots.length, minElo, dropped, refundedBets: openBets };
 }

@@ -130,7 +130,8 @@ All ladder games run server-side in the isolated-vm sandbox, 8 at a time by defa
   fewer of them. The live server runs with `none`.
 - **Seasons**: `arena new-season --data ./data [--min-elo 1200]` (with the server stopped) archives the data dir as `data-backup-YYYYMMDD-HHMMSS` (served
   read-only under past seasons) and starts the ladder over: every bot that carries over goes back to
-  1200 Elo with no games, and the match history and replays are cleared. Bots that finished the season
+  1200 Elo with no games, and the match history and replays are cleared. Past seasons keep their scores
+  (leaderboard, match results, playoff) but not their replays, which are deleted from the archive. Bots that finished the season
   below 1200 Elo (as shown, rounded) are removed from the ladder and stay only in the archive; `--min-elo N`
   sets a different threshold. Bot code and tokens are kept.
 - **Ending a season live**: the leaderboard's **End season** button (password: `djbobo`, or set
