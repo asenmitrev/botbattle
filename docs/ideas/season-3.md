@@ -4,9 +4,9 @@
 
 ## Summary
 
-_AI-generated on 2026-11-14 (gpt-6.1-sol); may be imperfect. Original submissions are preserved below._
+_AI-generated on 2026-11-15 (gpt-6.1-sol); may be imperfect. Original submissions are preserved below._
 
-Players want new siege and archer units, related upgrades, and adjustments to combat strength. They also ask for automated seasons with finals, more varied maps, clearer upgrade visuals, and changes or fixes to botcoin rewards and betting payouts.
+Players want new siege and archer units, specialized upgrades, and clearer upgrade visuals. They also suggest varied maps, automated seasons with top-bot finals, changes to botcoin rewards and betting payouts, and private bots with paid challenges.
 
 ### By topic
 
@@ -30,10 +30,11 @@ Players want new siege and archer units, related upgrades, and adjustments to co
 - [S3-015](#s3-015) Archers should have range of 3 and there should be an archer upgrade that gives them 1 range and costs 15 crystals
 - [S3-017](#s3-017) 50 energy upgrade for doubling the health of walls
 
-**🌍 Global/Rules Changes** (2)
+**🌍 Global/Rules Changes** (3)
 
 - [S3-006](#s3-006) At the end of every season we can have finals between the 8 best bots with eliminations
 - [S3-013](#s3-013) Preselect a season length (3-5-10 days) and add a countdown in the UI, then the battle royal can auto-battle when the…
+- [S3-019](#s3-019) instead of public bots, make them private and if somebody wants to play against someone&#x27;s bot, they need to do it on…
 
 **⚖️ Balance** (2)
 
@@ -206,4 +207,15 @@ Original submissions, verbatim.
 
 
 > Make different map templates (where crystals are on the sides, where there is only one crystal in the center, where energy is also further away from the starting base etc.)
+
+
+### S3-019
+
+- Submitted by: Mellow Yellow (@mellowyello)
+- Captured at (UTC): 2026-11-14T18:23:54.715494+00:00
+- Status: Proposed
+- Telegram reference: chat -1004294722012, message 387
+
+
+> instead of public bots, make them private and if somebody wants to play against someone&#x27;s bot, they need to do it on the seerver and it costs botcoin
 
