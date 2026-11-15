@@ -250,7 +250,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
   }
   let shownBalance: number | null = null;
   const LEDGER_LABEL: Record<string, string> = {
-    grant: "Starting grant", stipend: "Daily stipend", win: "Wins", draw: "Draws", boost: "Boost", bet: "Bet placed",
+    grant: "Starting grant", season: "New season: reset to 100", stipend: "Daily stipend", win: "Wins", draw: "Draws", boost: "Boost", bet: "Bet placed",
     payout: "Bet payout", refund: "Bet refund", submit: "Submission", test: "Test games", admin: "Adjustment",
   };
   function renderWallet(): void {
@@ -287,7 +287,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     const pop = $("wallet-pop");
     if (!wallet || !wallet.exists) {
       pop.innerHTML = `<h4>🪙 Botcoin</h4>
-        <p>Every browser gets <span class="big">100</span> botcoin, and your first ladder bot is <strong>free</strong>.</p>
+        <p>Every browser gets <span class="big">100</span> botcoin (everyone is set back to 100 each season), and your first ladder bot is <strong>free</strong>.</p>
         <ul><li>Claim +100 every day. Games don't pay coins: <strong>bet</strong> on your bot to win more.</li>
         <li>Spend them on <strong>test games</strong> against ladder bots (0.5 each), to <strong>boost</strong> your bot (priority games), or to <strong>bet</strong> on its next games.</li>
         <li>Extra bots cost more each time (30, 60, 90, ... per season), and extra versions on the same day cost coins.</li></ul>`;

@@ -103,6 +103,19 @@ describe("bets", () => {
     expect(next.wallets[W]!.balance).toBe(ECON.startingGrant);
     expect(next.bets).toEqual([]);
   });
+
+  it("a new season sets every wallet to the starting grant, richer or poorer", () => {
+    const e = new Economy(emptyEconomy());
+    e.ensureWallet("rich");
+    e.ensureWallet("poor");
+    e.credit("rich", 900, "admin");
+    e.debit("poor", 87.5, "admin");
+    const next = resetEconomyForSeason(e.data);
+    expect(next.wallets.rich!.balance).toBe(ECON.startingGrant);
+    expect(next.wallets.poor!.balance).toBe(ECON.startingGrant);
+    expect(next.wallets.rich!.ledger.at(-1)).toMatchObject({ kind: "season", delta: -900 });
+    expect(next.wallets.poor!.ledger.at(-1)).toMatchObject({ kind: "season", delta: 87.5 });
+  });
 });
 
 describe("submission costs (Ladder)", () => {

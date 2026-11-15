@@ -9,6 +9,7 @@ import { expectedScore } from "./elo.js";
 import type { MatchRecord } from "./store.js";
 
 export const ECON = {
+  /** A new wallet's balance; every wallet is also set back to this at the start of each season. */
   startingGrant: 100,
   /** Claimable once per UTC day. Games themselves pay nothing: bets are the only way to win coins. */
   dailyStipend: 100,
@@ -34,7 +35,7 @@ export const ECON = {
 } as const;
 
 /** "win" and "draw" are from before games stopped paying out; they only appear in old ledgers. */
-export type LedgerKind = "grant" | "stipend" | "win" | "draw" | "boost" | "bet" | "payout" | "refund" | "submit" | "test" | "admin";
+export type LedgerKind = "grant" | "season" | "stipend" | "win" | "draw" | "boost" | "bet" | "payout" | "refund" | "submit" | "test" | "admin";
 
 export interface LedgerEntry {
   at: string;
@@ -263,11 +264,16 @@ export function publicBet(b: Bet) {
 }
 
 /**
- * Season reset: wallets carry over (with the new-bot price back at the start), open bets are refunded and the bet history is cleared.
+ * Season reset: open bets are refunded, then every wallet is set to ECON.startingGrant (whatever it held) with
+ * the new-bot price back at the start, and the bet history is cleared.
  * Call it on the economy of the ladder.json that seeds the new season.
  */
 export function resetEconomyForSeason(data: EconomyData, now: () => Date = () => new Date()): EconomyData {
-  new Economy(data, now).refundBets();
-  for (const w of Object.values(data.wallets)) w.botsThisSeason = 0;
+  const e = new Economy(data, now);
+  e.refundBets();
+  for (const [owner, w] of Object.entries(data.wallets)) {
+    e.credit(owner, cents(ECON.startingGrant - w.balance), "season");
+    w.botsThisSeason = 0;
+  }
   return { wallets: data.wallets, bets: [], nextBet: data.nextBet };
 }

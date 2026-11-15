@@ -165,7 +165,7 @@ bots don't see it.
 
 | | |
 |---|---|
-| Starting grant | 100, when a browser first opens the playground (its wallet opens then) |
+| Starting grant | 100, when a browser first opens the playground (its wallet opens then). Every wallet is set back to 100 at the start of each season, whatever it held. |
 | Daily stipend | 100, claimable once per UTC day (**Claim +100** next to the balance) |
 | Rated games | pay nothing: bets are the only way to win coins from games (balances are kept to the cent) |
 | New bot | gets pricier through the season: the owner's first new bot is free, then 30, 60, 90, ... (30 × bots already submitted this season; deleting a bot doesn't lower it). An owner whose bots carried over from last season pays 30 for their first. The count resets at each new season. |
@@ -193,7 +193,7 @@ submission isn't free. On the leaderboard, your own bot's panel has **Boost** an
 
 Wallets live in `ladder.json`.
 - Owners whose bots predate a wallet get one, with the grant, at server start.
-- Wallets carry into a new season, and open bets are refunded (`arena new-season` does both).
+- At a new season open bets are refunded, then every wallet is set to 100 (`arena new-season` and **End season** both do this).
 
 ### API
 
