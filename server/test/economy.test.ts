@@ -135,6 +135,26 @@ describe("submission costs (Ladder)", () => {
     expect(bal(l, A)).toBe(ECON.startingGrant - ECON.newBotCost - ECON.updateCost);
   });
 
+  it("new bots get progressively pricier through the season; deleting doesn't reset it; a new season does", () => {
+    const { l } = ladder();
+    expect(l.submit("p1", "x", { owner: A }).cost).toBe(0);
+    expect(l.walletView(A).nextNewBotCost).toBe(ECON.newBotCost);
+    expect(l.submit("p2", "x", { owner: A }).cost).toBe(ECON.newBotCost);
+    expect(l.walletView(A).nextNewBotCost).toBe(2 * ECON.newBotCost);
+    const p3 = l.submit("p3", "x", { owner: A });
+    expect(p3.cost).toBe(2 * ECON.newBotCost);
+    l.deleteBot(p3.bot.id, { owner: A });
+    expect(l.walletView(A).nextNewBotCost).toBe(3 * ECON.newBotCost);
+    // New season: the count resets, but an owner with carried-over bots pays for the first new one.
+    const next = resetEconomyForSeason(l.economy.data); // wallets are carried over as-is
+    expect(Object.values(next.wallets).every((w) => w.botsThisSeason === 0)).toBe(true);
+    l.economy.credit(Object.keys(next.wallets)[0]!, 200, "admin");
+    expect(l.walletView(A).nextNewBotCost).toBe(ECON.newBotCost);
+    expect(l.submit("p4", "x", { owner: A }).cost).toBe(ECON.newBotCost);
+    expect(l.submit("p5", "x", { owner: A }).cost).toBe(ECON.newBotCost);
+    expect(l.submit("p6", "x", { owner: A }).cost).toBe(2 * ECON.newBotCost);
+  });
+
   it("a broke owner gets 402 and nothing changes", () => {
     const { l } = ladder();
     l.submit("one", "x", { owner: B });

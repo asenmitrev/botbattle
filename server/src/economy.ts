@@ -17,7 +17,10 @@ export const ECON = {
   maxBoostPairsQueued: 10,
   /** Unrated server-side test game against a ladder bot (its code never leaves the server). */
   testGameCost: 0.5,
-  /** The first bot an owner submits is free; every further bot costs this. */
+  /**
+   * New bots get pricier through the season: the first is free, the nth new bot costs newBotCost × (n − 1)
+   * (30, 60, 90, ...). Owners whose bots carried over from last season pay at least newBotCost for their first.
+   */
   newBotCost: 30,
   /** One free new version per bot per UTC day; further versions that day cost this. */
   updateCost: 5,
@@ -46,6 +49,8 @@ export interface Wallet {
   balance: number;
   createdAt: string;
   lastStipendDay: string | null;
+  /** New bots this wallet has submitted this season (deleting one doesn't lower it). Absent on old wallets. */
+  botsThisSeason?: number;
   /** Newest last. */
   ledger: LedgerEntry[];
 }
@@ -106,6 +111,14 @@ export function betPayout(stake: number, counted: readonly BetGame[]): number {
   return Math.round(stake * Math.min(ECON.maxBetMultiplier, Math.max(0, actual / expected)));
 }
 
+/**
+ * Price of a new bot, given how many this wallet already submitted this season and whether it owns any bot now
+ * (carried over from last season).
+ */
+export function newBotPrice(botsThisSeason: number, ownsAnyBot: boolean): number {
+  return ECON.newBotCost * Math.max(botsThisSeason, ownsAnyBot ? 1 : 0);
+}
+
 export class Economy {
   constructor(readonly data: EconomyData, private readonly now: () => Date = () => new Date()) {}
 
@@ -116,7 +129,7 @@ export class Economy {
   /** Open a wallet with the starting grant. Returns true if it was created. */
   ensureWallet(owner: string): boolean {
     if (this.data.wallets[owner]) return false;
-    this.data.wallets[owner] = { balance: 0, createdAt: this.now().toISOString(), lastStipendDay: null, ledger: [] };
+    this.data.wallets[owner] = { balance: 0, createdAt: this.now().toISOString(), lastStipendDay: null, botsThisSeason: 0, ledger: [] };
     this.credit(owner, ECON.startingGrant, "grant");
     return true;
   }
@@ -250,10 +263,11 @@ export function publicBet(b: Bet) {
 }
 
 /**
- * Season reset: wallets carry over, open bets are refunded and the bet history is cleared.
+ * Season reset: wallets carry over (with the new-bot price back at the start), open bets are refunded and the bet history is cleared.
  * Call it on the economy of the ladder.json that seeds the new season.
  */
 export function resetEconomyForSeason(data: EconomyData, now: () => Date = () => new Date()): EconomyData {
   new Economy(data, now).refundBets();
+  for (const w of Object.values(data.wallets)) w.botsThisSeason = 0;
   return { wallets: data.wallets, bets: [], nextBet: data.nextBet };
 }

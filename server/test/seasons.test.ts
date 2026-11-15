@@ -84,6 +84,7 @@ describe("startNewSeason", () => {
     l.placeBet(bot.id, { owner }, 30, 4);
     const loser = l.submit("loser", "export function onTick(){return []}", { owner }).bot;
     loser.elo = 1199.4; // shown as 1199
+    l.economy.credit(Object.keys(l.economy.data.wallets)[0]!, 100, "admin");
     const even = l.submit("even", "export function onTick(){return []}", { owner }).bot;
     even.elo = 1199.5; // shown as 1200
     l.save();
@@ -103,7 +104,8 @@ describe("startNewSeason", () => {
     expect(fresh.store.loadCode(loser.id)).toBeNull();
     expect(new JsonFileStore(r.archive).loadCode(loser.id)).toContain("onTick");
     expect(fresh.bot(even.id)).toBeDefined(); // shown as 1200: carries over
-    expect(fresh.walletView(owner).balance).toBe(100 - 30 - 30); // the bet stake came back; two extra bots cost 30 each
+    // The bet stake came back; the 2nd and 3rd bots cost 30 and 60.
+    expect(fresh.walletView(owner)).toMatchObject({ balance: 100 + 100 - 30 - 60, nextNewBotCost: 30 }); // count reset; owns bots, so not free
     expect(fresh.economy.openBet(b.id)).toBeUndefined();
     expect(new Seasons(dir).list().map((s) => s.id)).toEqual(["20261113-150405"]);
     expect(() => startNewSeason(path.join(root, "nope"))).toThrow(/no ladder.json/);

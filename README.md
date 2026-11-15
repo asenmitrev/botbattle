@@ -167,7 +167,7 @@ bots don't see it.
 | Starting grant | 100, when a browser first opens the playground (its wallet opens then) |
 | Daily stipend | 100, claimable once per UTC day (**Claim +100** next to the balance) |
 | Rated games | pay nothing: bets are the only way to win coins from games (balances are kept to the cent) |
-| New bot | the owner's first bot is free (while they have none on the ladder); each further bot costs 30 |
+| New bot | gets pricier through the season: the owner's first new bot is free, then 30, 60, 90, ... (30 × bots already submitted this season; deleting a bot doesn't lower it). An owner whose bots carried over from last season pays 30 for their first. The count resets at each new season. |
 | New version | one free version per bot per UTC day, then 5 each |
 | Boost | 5 per pair: two priority games (both sides, one seed) against an opponent picked like a background game, queued after placement and ahead of background games. Up to 10 pairs queued per bot. |
 | Test game | 0.5 per playground game against another owner's ladder bot. It runs on the server, so that bot's code never reaches the browser. It's unrated and isn't recorded. Games against house bots run in the browser for free; games against your own ladder bots are free too. Broken code isn't charged; a server failure is refunded. One test game at a time per wallet. |

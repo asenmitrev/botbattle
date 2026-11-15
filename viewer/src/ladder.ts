@@ -290,7 +290,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
         <p>Every browser gets <span class="big">100</span> botcoin, and your first ladder bot is <strong>free</strong>.</p>
         <ul><li>Claim +100 every day. Games don't pay coins: <strong>bet</strong> on your bot to win more.</li>
         <li>Spend them on <strong>test games</strong> against ladder bots (0.5 each), to <strong>boost</strong> your bot (priority games), or to <strong>bet</strong> on its next games.</li>
-        <li>Extra bots and extra versions on the same day cost coins.</li></ul>`;
+        <li>Extra bots cost more each time (30, 60, 90, ... per season), and extra versions on the same day cost coins.</li></ul>`;
       return;
     }
     const p = wallet.prices;
@@ -303,7 +303,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
         <li><strong>Test game</strong> vs a ladder bot: ${p.testGameCost} (played on the server; free vs house bots and your own)</li>
         <li><strong>Boost</strong>: ${p.boostPairCost} for 2 priority games</li>
         <li><strong>Bet</strong> ${p.betMinStake}–${p.betMaxStake} on your bot's next ${p.betGames.join("/")} games: up to 3× if it beats its rating</li>
-        <li><strong>Submit</strong>: next new bot ${wallet.nextNewBotCost}, 1 free version per bot per day, then ${p.updateCost}</li>
+        <li><strong>Submit</strong>: next new bot ${wallet.nextNewBotCost} (each one costs ${p.newBotCost} more this season), 1 free version per bot per day, then ${p.updateCost}</li>
       </ul>
       <div class="muted">Boost and bet from your bot's panel in the <strong>Leaderboard</strong>.</div>
       ${bets.length ? `<div class="pop-section"><strong>Your bets</strong>${bets.map(betLine).join("")}</div>` : ""}

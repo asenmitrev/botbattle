@@ -446,7 +446,7 @@ describe("botcoin API", () => {
     expect(bets[0].payout).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(bets)).not.toMatch(/owner/);
 
-    // A second bot costs 30; a broke owner gets 402.
+    // A second bot costs 30, a third 60; a broke owner gets 402.
     w = (await call("POST", "/api/wallet", { owner: A })).body;
     expect(w.nextNewBotCost).toBe(30);
     const second = await call("POST", "/api/bots", { name: "coin-two", code: STARTER, owner: A });
@@ -456,7 +456,7 @@ describe("botcoin API", () => {
     s.ladder.economy.debit(Object.keys(s.ladder.economy.data.wallets)[0]!, (await call("POST", "/api/wallet", { owner: A })).body.balance, "admin");
     const broke = await call("POST", "/api/bots", { name: "coin-three", code: STARTER, owner: A });
     expect(broke.status).toBe(402);
-    expect(broke.body).toMatchObject({ cost: 30, balance: 0 });
+    expect(broke.body).toMatchObject({ cost: 60, balance: 0 });
   });
 
   it("test games: played on the server, unrated, 0.5 vs others' bots, free vs house and own bots; code stays private", async () => {

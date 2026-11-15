@@ -3,7 +3,7 @@ import type { MatchResult } from "@arena/engine";
 import type { BotSource } from "@arena/sandbox";
 import { inProcessRunner, type MatchRun, type MatchRunner } from "./match-runner.js";
 import { ELO, kFactor, updateElo } from "./elo.js";
-import { dayKey, ECON, Economy, emptyEconomy, publicBet } from "./economy.js";
+import { dayKey, ECON, Economy, emptyEconomy, newBotPrice, publicBet } from "./economy.js";
 import type { BotRecord, LadderData, LadderStore, MatchRecord } from "./store.js";
 
 export const NAME_RE = /^[A-Za-z0-9_-]{2,24}$/;
@@ -72,8 +72,8 @@ export class Ladder {
   }
 
   /**
-   * What submitting `name` would cost, and from which wallet. An owner's first bot is free (while they
-   * have no bot on the ladder); each further bot costs ECON.newBotCost. Each bot gets one free version per UTC day,
+   * What submitting `name` would cost, and from which wallet. New bots get pricier through the season (see
+   * newBotPrice). Each bot gets one free version per UTC day,
    * then ECON.updateCost. Bots with no owner key on record (legacy token-only) are free.
    */
   quoteSubmit(name: string, owner: string | undefined): { cost: number; wallet: string | null; balance: number; freeUpdate: boolean } {
@@ -87,11 +87,20 @@ export class Ladder {
       // A legacy owner without a wallet gets one (and the grant) on this submission, so it can pay.
       return { cost: freeUpdate ? 0 : ECON.updateCost, wallet: h, balance: w ? balance : ECON.startingGrant, freeUpdate };
     }
-    return { cost: this.ownsAnyBot(h) ? ECON.newBotCost : 0, wallet: h, balance: w ? balance : ECON.startingGrant, freeUpdate: false };
+    return { cost: this.nextNewBotCost(h), wallet: h, balance: w ? balance : ECON.startingGrant, freeUpdate: false };
   }
 
-  private ownsAnyBot(wallet: string): boolean {
-    return this.data.bots.some((b) => !b.house && b.ownerHash && safeEqualHex(wallet, b.ownerHash));
+  private ownedBots(wallet: string): BotRecord[] {
+    return this.data.bots.filter((b) => !b.house && b.ownerHash && safeEqualHex(wallet, b.ownerHash));
+  }
+
+  /** New bots this wallet submitted this season. Wallets from before the counter count the bots they own. */
+  private botsThisSeason(wallet: string): number {
+    return this.economy.wallet(wallet)?.botsThisSeason ?? this.ownedBots(wallet).length;
+  }
+
+  private nextNewBotCost(wallet: string): number {
+    return newBotPrice(this.botsThisSeason(wallet), this.ownedBots(wallet).length > 0);
   }
 
   private balanceOf(wallet: string | null): number | null {
@@ -125,7 +134,7 @@ export class Ladder {
       balance: w?.balance ?? 0,
       stipendAvailable: this.economy.stipendAvailable(h),
       ledger: [...(w?.ledger ?? [])].reverse(),
-      nextNewBotCost: bots.length ? ECON.newBotCost : 0,
+      nextNewBotCost: this.nextNewBotCost(h),
       bots,
       bets: this.data.economy!.bets.filter((b) => b.owner === h || botIds.has(b.botId)).slice(-20).reverse().map(publicBet),
       prices: ECON,
@@ -277,7 +286,11 @@ export class Ladder {
     const b = newRecord(`b${randomBytes(6).toString("hex")}`, name, false);
     b.tokenHash = sha256(plain);
     if (owner) b.ownerHash = sha256(owner);
-    pay(name);
+    if (quote.wallet) {
+      const n = this.botsThisSeason(quote.wallet); // read before pay() may open the wallet
+      pay(name);
+      this.economy.wallet(quote.wallet)!.botsThisSeason = n + 1;
+    }
     this.store.saveCode(b.id, code);
     this.data.bots.push(b);
     this.save();
