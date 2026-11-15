@@ -75,6 +75,8 @@ bot in the editor on the right (Ctrl/Cmd+Enter runs it), pick an opponent and a 
 match on the left.
 
 - **Run ×10** plays 5 seeds × both sides and shows your first loss.
+- Ladder bots (with `arena server`) play on the server via `POST /api/test-game`: user bot code is never
+  sent to browsers. See Botcoin for the price.
 - **README · Bot API** shows BOT_API.md with a copy button so you can hand it to an LLM.
 - Your code is saved in the browser.
 
@@ -127,6 +129,14 @@ All ladder games run server-side in the isolated-vm sandbox, 8 at a time by defa
   read-only under past seasons) and starts the ladder over: every bot that carries over goes back to
   1200 Elo with no games, and the match history and replays are cleared. With `--min-elo N`, bots that
   finished below N (as shown, rounded) are left behind; they stay in the archive. Bot code and tokens are kept.
+- **Ending a season live**: the leaderboard's **End season** button (password: `djbobo`, or set
+  `ARENA_ADMIN_PASSWORD`) calls `POST /api/admin/end-season`. The ladder stops, and the top 8 bots by Elo (that
+  played this season) play a knockout playoff: 1v8, 4v5, 2v7, 3v6, then semifinals and a final, every matchup 5
+  games with alternating sides. Most wins advances; ties go to total score, then the better seed. Fewer than 8 bots
+  means byes for the top seeds. Playoff games are unrated and their replays are kept. The bracket updates live in the
+  leaderboard. Afterwards the season is archived exactly like `arena new-season` (with `playoff.json` in the archive,
+  and the playoff winner shown as the season's champion), and the new season starts right away. While the playoff
+  runs, submissions, deletes, boosts, bets and test games answer `503`.
 - **Submissions**: names are 2–24 characters `[A-Za-z0-9_-]` (case-insensitive unique), and code is at
   most 100 KB and must initialize in the sandbox. A new bot needs an owner key, and some submissions
   cost botcoin (see below). Submitting an unused name returns a secret `token`;
@@ -150,12 +160,13 @@ bots don't see it.
 
 | | |
 |---|---|
-| Starting grant | 100, when the owner's first bot is accepted (a wallet opens then) |
-| Daily stipend | 20, claimable once per UTC day (**+20 daily** next to the balance) |
-| Rated games | +0.1 per win, +0.01 per draw, to the bot owner's wallet (balances are kept to the cent) |
-| New bot | the owner's first bot is free; each further bot costs 30 |
+| Starting grant | 100, when a browser first opens the playground (its wallet opens then) |
+| Daily stipend | 100, claimable once per UTC day (**Claim +100** next to the balance) |
+| Rated games | pay nothing: bets are the only way to win coins from games (balances are kept to the cent) |
+| New bot | the owner's first bot is free (while they have none on the ladder); each further bot costs 30 |
 | New version | one free version per bot per UTC day, then 5 each |
 | Boost | 5 per pair: two priority games (both sides, one seed) against an opponent picked like a background game, queued after placement and ahead of background games. Up to 10 pairs queued per bot. |
+| Test game | 0.5 per playground game against another owner's ladder bot. It runs on the server, so that bot's code never reaches the browser. It's unrated and isn't recorded. Games against house bots run in the browser for free; games against your own ladder bots are free too. Broken code isn't charged; a server failure is refunded. One test game at a time per wallet. |
 | Bet | stake 5–500 on a bot's next 4, 10 or 20 rated games; one open bet per bot |
 
 A submission is charged only after its code passes the sandbox check. Without enough coins it gets a `402`.
@@ -168,8 +179,8 @@ Deleting a bot refunds nothing, except its open bet.
   version whose provisional rating hasn't caught up yet, pays out up to 3×.
 - Every rated game counts toward the bet, including placement and boost games, so boosting settles a bet faster.
 
-Win payouts are small (0.1 per win), so the daily stipend is most of everyone's income and a strong bot can't
-farm its way to unlimited boosts. A boost costs 2.5 per game, far more than any bot earns from a game.
+Games themselves pay nothing, so a strong bot can't farm coins just by playing. Income is the daily stipend
+plus whatever bets win.
 
 The playground shows the balance next to **Submit to ladder**, and the button shows the price when a
 submission isn't free. On the leaderboard, your own bot's panel has **Boost** and **Bet** controls,
@@ -183,12 +194,15 @@ Wallets live in `ladder.json`.
 
 | API | |
 |---|---|
-| `GET /api/health` | `{ok, queue, busy, boostQueue}` |
+| `GET /api/health` | `{ok, queue, busy, boostQueue, playoff}` (`playoff`: a season is ending) |
 | `POST /api/bots` | `{name, code, token?, owner?}` → `201 {id, name, version, token, placementGames, cost, balance}` (first submission; `owner` required) / `200 {id, name, version, placementGames, cost, balance}` (update) / `400` invalid / `402 {error, cost, balance}` not enough botcoin / `403` name taken or house / `429` rate limited |
 | `DELETE /api/bots/:id` | `{token?, owner?}` → `200 {deleted: id}` / `403` neither the bot's token nor its owner key, or house bot / `404` no such bot |
 | `POST /api/mine` | `{owner, claims?: [{id, token}]}` → `{ids}`: bots owned by this owner key. A claim whose token matches links that bot to the key. |
 | `GET /api/seasons` | past seasons (the `data-backup-*` folders next to the data dir): `[{id, number, endedAt, firstMatchAt, lastMatchAt, bots, matches, champion}]` |
 | `GET /api/seasons/:id/{leaderboard,highscore,bots/:bot/matches,matches/:m/replay}` | the same read-only views for an archived season |
+| `POST /api/admin/end-season` | `{password, minElo?}` → `202` (playoff started) / `403` wrong password / `409` already ending |
+| `GET /api/playoff` | the playoff in progress, else the last archived season's (or `null`): `{status, entrants, rounds: [[{a, b, games, aWins, bWins, draws, winner, status}]], champion, seasonId}` |
+| `GET /api/seasons/:id/playoff` | the playoff that closed that season, or `null` |
 | `GET /api/leaderboard` | `[{rank, id, name, elo, games, wins, losses, draws, highScore, highScoreMatch, version, provisional, house, lastPlayedAt, boosted, openBet}]` by Elo. `boosted` = queued boost pairs; `openBet` = `{stake, games, played}` or `null` |
 | `GET /api/highscore` | `{botId, name, score, matchId}` or `null` |
 | `GET /api/bots/:id/matches?limit=20` | `[{id, at, seed, p1:{id,name,version,eloBefore,eloAfter,score}, p2, winner, reason, tick}]`, newest first |

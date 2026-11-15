@@ -53,8 +53,9 @@ interface WalletView {
   ledger: { at: string; delta: number; kind: string; ref?: string; count?: number }[];
   bets: PublicBet[];
   prices: {
+    testGameCost: number;
     boostPairCost: number; maxBoostPairsQueued: number; betMinStake: number; betMaxStake: number; betGames: number[]; dailyStipend: number;
-    newBotCost: number; updateCost: number; winPayout: number; drawPayout: number;
+    newBotCost: number; updateCost: number;
   };
 }
 
@@ -82,7 +83,42 @@ interface Season {
   firstMatchAt: string | null;
   bots: number;
   matches: number;
-  champion: { name: string; elo: number } | null;
+  champion: { name: string; elo: number; playoff?: boolean } | null;
+  hasPlayoff?: boolean;
+}
+
+interface Entrant {
+  id: string;
+  name: string;
+  seed: number;
+  elo: number;
+}
+interface PlayoffGame {
+  id: string;
+  p1: string;
+  p2: string;
+  winner: 1 | 2 | "draw";
+  scores: [number, number];
+  reason: string;
+}
+interface Series {
+  a: Entrant | null;
+  b: Entrant | null;
+  games: PlayoffGame[];
+  aWins: number;
+  bWins: number;
+  draws: number;
+  winner: string | null;
+  status: "waiting" | "playing" | "done" | "bye";
+}
+interface Playoff {
+  status: "running" | "done" | "failed";
+  gamesPerSeries: number;
+  entrants: Entrant[];
+  rounds: Series[][];
+  champion: Entrant | null;
+  seasonId: string | null;
+  error?: string;
 }
 
 interface Identity {
@@ -123,7 +159,7 @@ function clearIdentity(): void {
  */
 const OWNER_KEY = "bot-arena:owner";
 let ownerKey: string | null = null;
-function owner(): string {
+export function owner(): string {
   if (ownerKey) return ownerKey;
   try {
     const v = localStorage.getItem(OWNER_KEY);
@@ -159,13 +195,17 @@ async function getJSON<T>(url: string): Promise<T> {
   return (await r.json()) as T;
 }
 
+let playoffLive = false;
+
 export async function initLadder(hooks: Hooks): Promise<void> {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 1500);
     const r = await fetch("/api/health", { signal: ctrl.signal, cache: "no-store" });
     clearTimeout(t);
-    if (!r.ok || !((await r.json()) as { ok?: boolean }).ok) return;
+    const h = r.ok ? ((await r.json()) as { ok?: boolean; playoff?: boolean }) : null;
+    if (!h?.ok) return;
+    playoffLive = !!h.playoff;
   } catch {
     return; // no ladder server (plain playground / arena view)
   }
@@ -211,7 +251,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
   let shownBalance: number | null = null;
   const LEDGER_LABEL: Record<string, string> = {
     grant: "Starting grant", stipend: "Daily stipend", win: "Wins", draw: "Draws", boost: "Boost", bet: "Bet placed",
-    payout: "Bet payout", refund: "Bet refund", submit: "Submission", admin: "Adjustment",
+    payout: "Bet payout", refund: "Bet refund", submit: "Submission", test: "Test games", admin: "Adjustment",
   };
   function renderWallet(): void {
     $("wallet-wrap").hidden = false;
@@ -247,9 +287,9 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     const pop = $("wallet-pop");
     if (!wallet || !wallet.exists) {
       pop.innerHTML = `<h4>🪙 Botcoin</h4>
-        <p>Submit your first bot to the ladder (it's <strong>free</strong>) and get <span class="big">100</span> botcoin.</p>
-        <ul><li>Claim +20 every day, and earn a little when your bot wins (+0.1) or draws (+0.01).</li>
-        <li>Spend them to <strong>boost</strong> your bot (priority games) or <strong>bet</strong> on its next games.</li>
+        <p>Every browser gets <span class="big">100</span> botcoin, and your first ladder bot is <strong>free</strong>.</p>
+        <ul><li>Claim +100 every day. Games don't pay coins: <strong>bet</strong> on your bot to win more.</li>
+        <li>Spend them on <strong>test games</strong> against ladder bots (0.5 each), to <strong>boost</strong> your bot (priority games), or to <strong>bet</strong> on its next games.</li>
         <li>Extra bots and extra versions on the same day cost coins.</li></ul>`;
       return;
     }
@@ -259,7 +299,8 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     pop.innerHTML = `<h4>🪙 Botcoin</h4>
       <div><span class="big">${coin(wallet.balance)}</span> <span class="muted">botcoin</span></div>
       <ul>
-        <li><strong>Earn</strong>: +${p.winPayout} per win, +${p.drawPayout} per draw, +${p.dailyStipend} daily${wallet.stipendAvailable ? " <strong>(ready to claim)</strong>" : ""}</li>
+        <li><strong>Earn</strong>: +${p.dailyStipend} daily${wallet.stipendAvailable ? " <strong>(ready to claim)</strong>" : ""}, and from bets (games themselves pay nothing)</li>
+        <li><strong>Test game</strong> vs a ladder bot: ${p.testGameCost} (played on the server; free vs house bots and your own)</li>
         <li><strong>Boost</strong>: ${p.boostPairCost} for 2 priority games</li>
         <li><strong>Bet</strong> ${p.betMinStake}–${p.betMaxStake} on your bot's next ${p.betGames.join("/")} games: up to 3× if it beats its rating</li>
         <li><strong>Submit</strong>: next new bot ${wallet.nextNewBotCost}, 1 free version per bot per day, then ${p.updateCost}</li>
@@ -317,6 +358,8 @@ export async function initLadder(hooks: Hooks): Promise<void> {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") $("wallet-pop").hidden = true;
   });
+  // Server test games spend coins: show it right away.
+  window.addEventListener("botcoin-changed", () => void loadWallet());
   // Keep the balance live so win payouts show up as they happen.
   window.setInterval(() => {
     if (!document.hidden) void loadWallet();
@@ -337,6 +380,20 @@ export async function initLadder(hooks: Hooks): Promise<void> {
   if (me) nameInput.value = me.name;
   $("ladder-controls").hidden = false;
   $("leaderboard-btn").hidden = false;
+  /** The Leaderboard button says so while a playoff is being played. */
+  function markPlayoffLive(live: boolean): void {
+    playoffLive = live;
+    $("leaderboard-btn").innerHTML = live ? `Leaderboard <span class="tag" style="background:var(--danger);color:#fff">🏆 playoff live</span>` : "Leaderboard";
+  }
+  markPlayoffLive(playoffLive);
+  window.setInterval(async () => {
+    if (document.hidden) return;
+    try {
+      markPlayoffLive(!!(await getJSON<{ playoff?: boolean }>("/api/health")).playoff);
+    } catch {
+      /* keep */
+    }
+  }, 15_000);
 
   // ---------------------------------------------------------------- submit
   const submitBtn = $<HTMLButtonElement>("submit-btn");
@@ -405,13 +462,16 @@ export async function initLadder(hooks: Hooks): Promise<void> {
         .reverse()
         .map((s) => btn(s.id, `Season ${s.number}`, `ended ${fmtDate(s.endedAt)}`, `${s.bots} bots · ${s.matches} matches archived` + (s.champion ? ` · champion ${s.champion.name} (${s.champion.elo})` : "")))
         .join("");
+    $("end-season-btn").hidden = !!season || playoffLive;
+    if (season || playoffLive) $("end-season").hidden = true;
+    $("end-season-name").textContent = `season ${seasons.length + 1}`;
     const note = $("season-note");
     const cur = seasons.find((s) => s.id === season);
     note.hidden = !cur;
     if (cur) {
       note.textContent =
         `Final standings of season ${cur.number}, archived ${fmtDate(cur.endedAt)}.` +
-        (cur.champion ? ` Champion: ${cur.champion.name} (${cur.champion.elo}).` : "") +
+        (cur.champion ? ` Champion: ${cur.champion.name}${cur.champion.playoff ? " (playoff winner)" : ` (${cur.champion.elo})`}.` : "") +
         ` Only the last ${cur.matches} matches${cur.firstMatchAt ? ` (since ${fmtDate(cur.firstMatchAt)})` : ""} are kept; replays recorded under older rules play only if they still play out the same.`;
     }
   }
@@ -427,6 +487,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     $("ladder-rows").innerHTML = "";
     renderSeasonBar();
     void refresh();
+    void loadPlayoff();
   });
 
   /** `withMatches`: also reload the selected bot's match list (manual refresh only, so rows never shift under the cursor). */
@@ -557,6 +618,139 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     }
   }
 
+  // ---------------------------------------------------------------- end of season: playoff
+  /** The playoff on screen: the live one (running or failed) on the live tab, else the archived season's. */
+  let shownPlayoff: Playoff | null = null;
+  let playoffTimer = 0;
+  const ROUND_NAMES = ["Final", "Semifinals", "Quarterfinals", "Round of 16"];
+  const seasonNumber = (id: string | null) => (id ? seasons.find((s) => s.id === id)?.number : seasons.length + 1);
+
+  async function loadPlayoff(): Promise<void> {
+    const shown = season;
+    let p: Playoff | null = null;
+    try {
+      p = await getJSON<Playoff | null>(season ? `/api/seasons/${encodeURIComponent(season)}/playoff` : "/api/playoff");
+    } catch {
+      p = null;
+    }
+    if (shown !== season) return;
+    // On the live tab only a playoff in progress (or one that failed) belongs here; a finished one lives with its season.
+    if (!season && p && p.status === "done") {
+      if ((shownPlayoff?.status === "running" || playoffLive) && p.seasonId) return void finishedPlayoff(p);
+      p = null;
+    }
+    shownPlayoff = p;
+    const wasLive = playoffLive;
+    if (!season) {
+      playoffLive = p?.status === "running";
+      if (wasLive !== playoffLive) renderSeasonBar();
+    }
+    renderPlayoff();
+    clearTimeout(playoffTimer);
+    if (!season && p?.status === "running" && dialog.open) playoffTimer = window.setTimeout(() => void loadPlayoff(), 2000);
+  }
+
+  /** The live playoff just ended: the season is archived, so show the bracket under its season tab. */
+  async function finishedPlayoff(p: Playoff): Promise<void> {
+    markPlayoffLive(false);
+    await loadSeasons();
+    season = p.seasonId;
+    selected = null;
+    $("ladder-matches").hidden = true;
+    renderSeasonBar();
+    void refresh();
+    shownPlayoff = p;
+    renderPlayoff();
+    hooks.status(`🏆 ${p.champion?.name ?? "Nobody"} won the season ${seasonNumber(season)} playoff! A new season has started.`, "ok");
+  }
+
+  function renderPlayoff(): void {
+    const box = $("playoff");
+    const p = shownPlayoff;
+    box.hidden = !p;
+    if (!p) return;
+    const num = seasonNumber(season);
+    const head = `<div class="playoff-head"><strong>🏆 Season ${num ?? ""} playoff</strong>
+      <span class="muted">top ${p.entrants.length} · ${p.gamesPerSeries} games per matchup · click a game to watch</span>
+      ${p.status === "running" ? `<span class="live">● live</span>` : ""}
+      ${p.status === "failed" ? `<span class="down" style="color:var(--danger)">failed: ${esc(p.error ?? "unknown error")}. The season was not ended.</span>` : ""}</div>`;
+    const champ = p.champion && p.status === "done"
+      ? `<div class="champion">🏆 ${esc(p.champion.name)} is the champion<span class="muted">seed ${p.champion.seed} · ${p.champion.elo} Elo at the end of the season</span></div>`
+      : "";
+    const rounds = p.rounds
+      .map((r, i) => `<div class="round"><h5>${ROUND_NAMES[p.rounds.length - 1 - i] ?? `Round ${i + 1}`}</h5><div class="round-series">${r.map((s) => seriesCard(s, p)).join("")}</div></div>`)
+      .join("");
+    box.innerHTML = head + champ + `<div class="bracket">${rounds}</div>`;
+  }
+
+  function seriesCard(s: Series, p: Playoff): string {
+    const line = (e: Entrant | null, wins: number, cls: string) => {
+      if (!e) return `<div class="sl ${cls}"><span class="seed"></span><span class="nm muted">${s.status === "bye" ? "bye" : "TBD"}</span><span class="w"></span></div>`;
+      const state = s.winner ? (s.winner === e.id ? "won" : "lost") : "";
+      return `<div class="sl ${cls} ${state}"><span class="seed">${e.seed}</span><span class="nm" title="${esc(e.name)} · ${e.elo} Elo">${esc(e.name)}${isMine(e.id) ? `<span class="tag you">you</span>` : ""}</span><span class="w">${s.status === "bye" || s.status === "waiting" ? "" : wins}</span></div>`;
+    };
+    let pips = "";
+    if (s.status !== "bye" && s.a && s.b) {
+      for (let g = 0; g < p.gamesPerSeries; g++) {
+        const game = s.games[g];
+        if (!game) {
+          pips += `<button class="pip ${s.status === "playing" && g === s.games.length ? "next" : ""}" disabled>${g + 1}</button>`;
+          continue;
+        }
+        const winnerId = game.winner === "draw" ? null : game.winner === 1 ? game.p1 : game.p2;
+        const who = winnerId === s.a.id ? "a" : winnerId === s.b.id ? "b" : "d";
+        const name = (id: string) => (id === s.a!.id ? s.a!.name : s.b!.name);
+        const title = `Game ${g + 1}: ${name(game.p1)} ${game.scores[0]} : ${game.scores[1]} ${name(game.p2)} · ${game.reason.replace("_", " ")}${winnerId ? ` · ${name(winnerId)} wins` : " · draw"}`;
+        pips += `<button class="pip ${who}" data-pgame="${esc(game.id)}" title="${esc(title)}">${who === "d" ? "=" : g + 1}</button>`;
+      }
+    }
+    return `<div class="series ${s.status}">${line(s.a, s.aWins, "top")}${line(s.b, s.bWins, "bot")}${pips ? `<div class="pips">${pips}</div>` : ""}</div>`;
+  }
+
+  $("playoff").addEventListener("click", async (e) => {
+    const pip = (e.target as HTMLElement).closest<HTMLElement>("[data-pgame]");
+    if (!pip || !shownPlayoff) return;
+    const id = pip.dataset.pgame!;
+    const base = shownPlayoff.seasonId ? `/api/seasons/${encodeURIComponent(shownPlayoff.seasonId)}` : "/api";
+    try {
+      const replay = await getJSON<Replay>(`${base}/matches/${encodeURIComponent(id)}/replay`);
+      if (!hooks.showReplay(replay)) return;
+      dialog.close();
+      hooks.status(`Playoff game ${id}: ${replay.bots[0]} vs ${replay.bots[1]}, seed ${replay.seed}.`, "ok");
+    } catch (err) {
+      hooks.status(`Could not load replay: ${err instanceof Error ? err.message : String(err)}`, "err");
+    }
+  });
+
+  $("end-season-btn").addEventListener("click", () => {
+    const form = $("end-season");
+    form.hidden = !form.hidden;
+    if (!form.hidden) $<HTMLInputElement>("end-season-pass").focus();
+  });
+  $("end-season-cancel").addEventListener("click", () => ($("end-season").hidden = true));
+  $<HTMLFormElement>("end-season").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pass = $<HTMLInputElement>("end-season-pass");
+    const go = $<HTMLButtonElement>("end-season-go");
+    go.disabled = true;
+    try {
+      await postJSON("/api/admin/end-season", { password: pass.value });
+      pass.value = "";
+      $("end-season").hidden = true;
+      season = null;
+      playoffLive = true;
+      markPlayoffLive(true);
+      renderSeasonBar();
+      hooks.status("The season is ending: the playoff has started. Watch the bracket in the Leaderboard.", "ok");
+      await loadPlayoff();
+    } catch (err) {
+      hooks.status(`Could not end the season: ${err instanceof Error ? err.message : String(err)}`, "err");
+      pass.select();
+    } finally {
+      go.disabled = false;
+    }
+  });
+
   /** Inline confirm: "Delete bot" → "Really delete X? …" [Confirm] [Cancel]. */
   async function deleteStep(btn: HTMLButtonElement): Promise<void> {
     const wrap = btn.closest<HTMLElement>(".bot-delete")!;
@@ -630,10 +824,14 @@ export async function initLadder(hooks: Hooks): Promise<void> {
 
   $("leaderboard-btn").addEventListener("click", () => {
     dialog.showModal();
-    void loadSeasons();
+    void loadSeasons().then(() => loadPlayoff());
     void syncMine().then(() => refresh());
     clearInterval(timer);
-    timer = window.setInterval(() => void (season ? undefined : refresh()), 10_000);
+    timer = window.setInterval(() => {
+      if (season) return;
+      void refresh();
+      if (playoffLive && shownPlayoff?.status !== "running") void loadPlayoff();
+    }, 10_000);
   });
   $("ladder-refresh").addEventListener("click", () => void refresh(true));
   $("bets-btn").addEventListener("click", () => void showBets());
@@ -641,5 +839,8 @@ export async function initLadder(hooks: Hooks): Promise<void> {
   dialog.addEventListener("click", (e) => {
     if (e.target === dialog) dialog.close();
   });
-  dialog.addEventListener("close", () => clearInterval(timer));
+  dialog.addEventListener("close", () => {
+    clearInterval(timer);
+    clearTimeout(playoffTimer);
+  });
 }

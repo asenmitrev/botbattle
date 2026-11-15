@@ -241,3 +241,41 @@ dialog.howto::backdrop { background: rgba(0,0,0,.65); }
 .wallet-pop .pop-section { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); }
 .wallet-pop .bet-line { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
 .wallet-pop .bet-line span:last-child { font-family: var(--mono); white-space: nowrap; }
+
+/* ---- end of season: playoff bracket */
+.end-season { border: 1px solid var(--danger); border-radius: 8px; padding: 10px 12px; background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.end-season[hidden], .playoff[hidden], #end-season-btn[hidden] { display: none; }
+.end-season p { margin: 0 0 8px; color: var(--text-secondary); }
+.end-season-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.end-season-row input { font: inherit; color: var(--text-primary); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; min-width: 0; flex: 1 1 140px; }
+.playoff { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); }
+.playoff-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.playoff-head .live { color: var(--danger); font-weight: 600; animation: pulse 1.4s ease-in-out infinite; }
+.champion { text-align: center; padding: 10px; margin-bottom: 10px; border-radius: 8px; font-size: 16px; font-weight: 700; color: var(--gold-strong); background: var(--gold-soft); border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent); }
+.champion .muted { display: block; font-size: 12px; font-weight: 400; }
+.bracket { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(180px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 4px; }
+.round { display: flex; flex-direction: column; justify-content: space-around; gap: 8px; }
+.round h5 { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.round-series { display: flex; flex-direction: column; justify-content: space-around; gap: 8px; flex: 1; }
+.series { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); padding: 4px 0; font-variant-numeric: tabular-nums; }
+.series.playing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.series.waiting, .series.bye { opacity: .6; }
+.sl { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; align-items: center; padding: 2px 8px; }
+.sl .seed { color: var(--text-muted); font-size: 11px; text-align: right; }
+.sl .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl .w { font-weight: 700; min-width: 12px; text-align: right; }
+.sl.won .nm { font-weight: 700; }
+.sl.won .w { color: var(--ok); }
+.sl.lost { color: var(--text-muted); }
+.sl.top .nm::before, .sl.bot .nm::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.sl.top .nm::before { background: var(--p1); }
+.sl.bot .nm::before { background: var(--p2); }
+.pips { display: flex; gap: 3px; padding: 4px 8px 2px; }
+.pip { font: 600 10px var(--mono); width: 20px; height: 16px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface-3); color: var(--text-muted); padding: 0; cursor: default; }
+.pip[data-pgame] { cursor: pointer; color: #fff; }
+.pip.a { background: var(--p1); border-color: var(--p1); }
+.pip.b { background: var(--p2); border-color: var(--p2); }
+.pip.d { background: var(--surface-3); color: var(--text-secondary); }
+.pip.next { border-color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .playoff-head .live, .pip.next { animation: none; } }

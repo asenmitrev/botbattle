@@ -1,7 +1,8 @@
 /**
  * Botcoin: play money per owner key (wallet id = sha256 of the browser owner key, the same `ownerHash`
- * bots carry). Coins pay for extra bots, extra versions and priority (boost) games, and can be staked
- * on a bot's next N rated games. Wins pay a little back. Pure bookkeeping over `EconomyData`, which lives
+ * bots carry). The wallet opens when the browser first visits. Coins pay for extra bots, extra versions,
+ * server-side test games and priority (boost) games, and can be staked
+ * on a bot's next N rated games (games themselves pay nothing). Pure bookkeeping over `EconomyData`, which lives
  * inside ladder.json so results and coins are saved in one atomic write.
  */
 import { expectedScore } from "./elo.js";
@@ -9,13 +10,14 @@ import type { MatchRecord } from "./store.js";
 
 export const ECON = {
   startingGrant: 100,
-  dailyStipend: 20,
-  winPayout: 0.1,
-  drawPayout: 0.01,
+  /** Claimable once per UTC day. Games themselves pay nothing: bets are the only way to win coins. */
+  dailyStipend: 100,
   /** One boost = one pair of games (both sides, one seed). */
   boostPairCost: 5,
   maxBoostPairsQueued: 10,
-  /** The first bot an owner submits is free (it opens the wallet); every further bot costs this. */
+  /** Unrated server-side test game against a ladder bot (its code never leaves the server). */
+  testGameCost: 0.5,
+  /** The first bot an owner submits is free; every further bot costs this. */
   newBotCost: 30,
   /** One free new version per bot per UTC day; further versions that day cost this. */
   updateCost: 5,
@@ -28,14 +30,15 @@ export const ECON = {
   settledBetsKept: 200,
 } as const;
 
-export type LedgerKind = "grant" | "stipend" | "win" | "draw" | "boost" | "bet" | "payout" | "refund" | "submit" | "admin";
+/** "win" and "draw" are from before games stopped paying out; they only appear in old ledgers. */
+export type LedgerKind = "grant" | "stipend" | "win" | "draw" | "boost" | "bet" | "payout" | "refund" | "submit" | "test" | "admin";
 
 export interface LedgerEntry {
   at: string;
   delta: number;
   kind: LedgerKind;
   ref?: string;
-  /** Consecutive entries of the same kind and ref (e.g. win payouts) are merged; this counts them. */
+  /** Consecutive entries of the same kind and ref (e.g. test games) are merged; this counts them. */
   count?: number;
 }
 
@@ -138,7 +141,7 @@ export class Economy {
   private log(w: Wallet, delta: number, kind: LedgerKind, ref?: string): void {
     const at = this.now().toISOString();
     const last = w.ledger[w.ledger.length - 1];
-    if (last && (kind === "win" || kind === "draw") && last.kind === kind && last.ref === ref) {
+    if (last && kind === "test" && last.kind === kind && last.ref === ref) {
       last.delta = cents(last.delta + delta);
       last.count = (last.count ?? 1) + 1;
       last.at = at;
@@ -181,19 +184,14 @@ export class Economy {
   }
 
   /**
-   * A rated game finished: pay the owners for wins/draws and advance (and maybe settle) open bets.
-   * `owners` maps each side's bot id to its ownerHash (null for house or unlinked bots).
+   * A rated game finished: advance (and maybe settle) open bets on either side. Games pay no coins.
    */
-  recordGame(m: MatchRecord, owners: { p1: string | null; p2: string | null }): void {
+  recordGame(m: MatchRecord): void {
     const sides = [
-      { me: m.p1, opp: m.p2, owner: owners.p1, result: m.winner === "draw" ? 0.5 : m.winner === 1 ? 1 : 0 },
-      { me: m.p2, opp: m.p1, owner: owners.p2, result: m.winner === "draw" ? 0.5 : m.winner === 2 ? 1 : 0 },
+      { me: m.p1, opp: m.p2, result: m.winner === "draw" ? 0.5 : m.winner === 1 ? 1 : 0 },
+      { me: m.p2, opp: m.p1, result: m.winner === "draw" ? 0.5 : m.winner === 2 ? 1 : 0 },
     ];
     for (const s of sides) {
-      if (s.owner) {
-        if (s.result === 1) this.credit(s.owner, ECON.winPayout, "win", s.me.name);
-        else if (s.result === 0.5) this.credit(s.owner, ECON.drawPayout, "draw", s.me.name);
-      }
       const bet = this.openBet(s.me.id);
       if (!bet) continue;
       bet.counted.push({ matchId: m.id, result: s.result, expected: expectedScore(s.me.eloBefore, s.opp.eloBefore) });

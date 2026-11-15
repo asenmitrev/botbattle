@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import type { MatchResult } from "@arena/engine";
 import type { BotSource } from "@arena/sandbox";
 import { inProcessRunner, type MatchRun, type MatchRunner } from "./match-runner.js";
 import { ELO, kFactor, updateElo } from "./elo.js";
@@ -71,8 +72,8 @@ export class Ladder {
   }
 
   /**
-   * What submitting `name` would cost, and from which wallet. A new owner's first bot is free (it opens
-   * the wallet); each further bot costs ECON.newBotCost. Each bot gets one free version per UTC day,
+   * What submitting `name` would cost, and from which wallet. An owner's first bot is free (while they
+   * have no bot on the ladder); each further bot costs ECON.newBotCost. Each bot gets one free version per UTC day,
    * then ECON.updateCost. Bots with no owner key on record (legacy token-only) are free.
    */
   quoteSubmit(name: string, owner: string | undefined): { cost: number; wallet: string | null; balance: number; freeUpdate: boolean } {
@@ -86,7 +87,11 @@ export class Ladder {
       // A legacy owner without a wallet gets one (and the grant) on this submission, so it can pay.
       return { cost: freeUpdate ? 0 : ECON.updateCost, wallet: h, balance: w ? balance : ECON.startingGrant, freeUpdate };
     }
-    return { cost: w ? ECON.newBotCost : 0, wallet: h, balance: w ? balance : ECON.startingGrant, freeUpdate: false };
+    return { cost: this.ownsAnyBot(h) ? ECON.newBotCost : 0, wallet: h, balance: w ? balance : ECON.startingGrant, freeUpdate: false };
+  }
+
+  private ownsAnyBot(wallet: string): boolean {
+    return this.data.bots.some((b) => !b.house && b.ownerHash && safeEqualHex(wallet, b.ownerHash));
   }
 
   private balanceOf(wallet: string | null): number | null {
@@ -104,10 +109,11 @@ export class Ladder {
     return { bot: b, wallet: b.ownerHash };
   }
 
-  /** Wallet summary for an owner key (read-only; a key with no wallet gets `exists: false`). */
+  /** Wallet summary for an owner key. Opens the wallet (with the starting grant) on a browser's first visit. */
   walletView(owner: string) {
     if (!OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
     const h = sha256(owner);
+    if (this.economy.ensureWallet(h)) this.save();
     const w = this.economy.wallet(h);
     const today = dayKey(this.now());
     const bots = this.data.bots
@@ -119,7 +125,7 @@ export class Ladder {
       balance: w?.balance ?? 0,
       stipendAvailable: this.economy.stipendAvailable(h),
       ledger: [...(w?.ledger ?? [])].reverse(),
-      nextNewBotCost: w ? ECON.newBotCost : 0,
+      nextNewBotCost: bots.length ? ECON.newBotCost : 0,
       bots,
       bets: this.data.economy!.bets.filter((b) => b.owner === h || botIds.has(b.botId)).slice(-20).reverse().map(publicBet),
       prices: ECON,
@@ -146,6 +152,33 @@ export class Ladder {
     this.economy.debit(wallet, pairs * ECON.boostPairCost, "boost", bot.name);
     this.save();
     return { bot, balance: this.economy.wallet(wallet)!.balance };
+  }
+
+  /**
+   * Charge for one unrated test game against `opponentId` and hand back its source (which stays on the
+   * server). Free against house bots and your own bots, whose code you can already see.
+   */
+  chargeTestGame(owner: string, opponentId: string): { wallet: string; opponent: BotRecord; src: BotSource; free: boolean; cost: number; balance: number } {
+    if (!OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
+    const opp = this.bot(opponentId);
+    if (!opp) throw new SubmitError(404, "no such bot");
+    const h = sha256(owner);
+    this.economy.ensureWallet(h);
+    const free = opp.house || this.owns(opp, { owner });
+    const cost = free ? 0 : ECON.testGameCost;
+    const src = this.source(opp);
+    if (cost) {
+      this.economy.debit(h, cost, "test", opp.name);
+      this.save();
+    }
+    return { wallet: h, opponent: opp, src, free, cost, balance: this.economy.wallet(h)!.balance };
+  }
+
+  /** Give a test game's coins back (the server failed to play it). */
+  refundTestGame(wallet: string, cost: number, opponentName: string): void {
+    if (!cost) return;
+    this.economy.credit(wallet, cost, "refund", opponentName);
+    this.save();
   }
 
   recentBets(limit: number) {
@@ -328,7 +361,7 @@ export class Ladder {
     this.store.saveReplay(id, outcome.replay);
     apply(a, ea, scoreA, res.scores[0], id, at);
     apply(b, eb, 1 - scoreA, res.scores[1], id, at);
-    this.economy.recordGame(rec, { p1: a.house ? null : a.ownerHash ?? null, p2: b.house ? null : b.ownerHash ?? null });
+    this.economy.recordGame(rec);
     this.data.matches.push(rec);
     while (this.data.matches.length > this.maxMatches) {
       const old = this.data.matches.shift()!;
@@ -336,6 +369,28 @@ export class Ladder {
     }
     this.save();
     return rec;
+  }
+
+  /**
+   * Play one unrated game (playoffs): nothing about the bots changes. The replay is saved under
+   * `<prefix><counter>`, sharing the match counter so ids never collide with rated matches.
+   */
+  async playExhibition(p1Id: string, p2Id: string, seed: number, prefix = "x"): Promise<{ id: string; result: MatchResult }> {
+    const a = this.bot(p1Id);
+    const b = this.bot(p2Id);
+    if (!a || !b) throw new Error("unknown bot");
+    const outcome = await this.runner({
+      seed,
+      bots: [
+        { src: this.source(a), rngSeed: (seed * 2 + 1) >>> 0 },
+        { src: this.source(b), rngSeed: (seed * 2 + 2) >>> 0 },
+      ],
+    });
+    const id = `${prefix}${String(this.data.nextMatch++).padStart(7, "0")}`;
+    outcome.replay.bots = [a.name, b.name];
+    this.store.saveReplay(id, outcome.replay);
+    this.save();
+    return { id, result: outcome.result };
   }
 
   leaderboard(): LeaderboardRow[] {

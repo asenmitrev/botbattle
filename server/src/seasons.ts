@@ -3,6 +3,7 @@ import path from "node:path";
 import { emptyEconomy, resetEconomyForSeason } from "./economy.js";
 import { ELO } from "./elo.js";
 import { Ladder } from "./ladder.js";
+import { loadPlayoff, type Playoff } from "./playoff.js";
 import { JsonFileStore, type BotRecord, type LadderData, type LadderStore } from "./store.js";
 
 /**
@@ -19,7 +20,9 @@ export interface SeasonInfo {
   lastMatchAt: string | null;
   bots: number;
   matches: number;
-  champion: { name: string; elo: number } | null;
+  /** The playoff winner when the season ended with a playoff, else the top of the final standings. */
+  champion: { name: string; elo: number; playoff?: boolean } | null;
+  hasPlayoff: boolean;
 }
 
 const ID_RE = /^\d{8}-\d{6}$/;
@@ -43,7 +46,7 @@ class ArchivedStore extends JsonFileStore {
 export class Seasons {
   private readonly parent: string;
   private readonly prefix: string;
-  private readonly cache = new Map<string, { mtimeMs: number; ladder: Ladder; store: ArchivedStore; info: Omit<SeasonInfo, "number"> }>();
+  private readonly cache = new Map<string, { mtimeMs: number; ladder: Ladder; store: ArchivedStore; info: Omit<SeasonInfo, "number">; dir: string }>();
 
   constructor(dataDir: string) {
     const abs = path.resolve(dataDir);
@@ -80,7 +83,10 @@ export class Seasons {
     const store = new ArchivedStore(dir);
     const ladder = new Ladder(store);
     const data = store.load();
-    const top = ladder.leaderboard()[0];
+    const board = ladder.leaderboard();
+    const top = board[0];
+    const playoff = loadPlayoff(dir);
+    const pc = playoff?.status === "done" && playoff.champion ? playoff.champion : null;
     const m = id.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/)!;
     const info = {
       id,
@@ -89,9 +95,14 @@ export class Seasons {
       lastMatchAt: data.matches.at(-1)?.at ?? null,
       bots: data.bots.length,
       matches: data.matches.length,
-      champion: top && top.games > 0 ? { name: top.name, elo: top.elo } : null,
+      champion: pc
+        ? { name: pc.name, elo: board.find((r) => r.id === pc.id)?.elo ?? pc.elo, playoff: true }
+        : top && top.games > 0
+          ? { name: top.name, elo: top.elo }
+          : null,
+      hasPlayoff: !!playoff,
     };
-    const entry = { mtimeMs, ladder, store, info };
+    const entry = { mtimeMs, ladder, store, info, dir };
     this.cache.set(id, entry);
     return entry;
   }
@@ -105,8 +116,21 @@ export class Seasons {
     return out;
   }
 
-  get(id: string): { ladder: Ladder; store: LadderStore } | null {
+  get(id: string): { ladder: Ladder; store: LadderStore; dir: string } | null {
     return this.ids().includes(id) ? this.open(id) : null;
+  }
+
+  /** The playoff that closed this season, if it ended with one. */
+  playoff(id: string): Playoff | null {
+    const s = this.get(id);
+    const p = s ? loadPlayoff(s.dir) : null;
+    return p ? { ...p, seasonId: id } : null;
+  }
+
+  /** The newest archived season's playoff, if it had one. */
+  latestPlayoff(): Playoff | null {
+    const last = this.ids().at(-1);
+    return last ? this.playoff(last) : null;
   }
 }
 
@@ -124,7 +148,7 @@ export function startNewSeason(
   dataDir: string,
   now: Date = new Date(),
   opts: { minElo?: number } = {},
-): { archive: string; bots: number; dropped: { name: string; elo: number }[]; refundedBets: number } {
+): { archive: string; id: string; bots: number; dropped: { name: string; elo: number }[]; refundedBets: number } {
   const abs = path.resolve(dataDir);
   const ladderFile = path.join(abs, "ladder.json");
   if (!fs.existsSync(ladderFile)) throw new Error(`no ladder.json in ${abs}`);
@@ -164,5 +188,5 @@ export function startNewSeason(
   // Counters keep counting, so match ids and seeds never repeat across seasons.
   const data: LadderData = { formatVersion: 1, nextSeed: old.nextSeed, nextMatch: old.nextMatch, bots, matches: [], economy };
   fresh.save(data);
-  return { archive, bots: bots.length, dropped, refundedBets: openBets };
+  return { archive, id: stamp, bots: bots.length, dropped, refundedBets: openBets };
 }

@@ -18,7 +18,7 @@
               <span class="coin" aria-hidden="true">B</span><span id="wallet-balance" class="wallet-balance">0</span><span class="wallet-unit">botcoin</span>
               <span id="wallet-delta" class="wallet-delta" aria-hidden="true"></span>
             </button>
-            <button id="stipend-btn" class="stipend-btn" title="Claim today's free botcoin" hidden>Claim +20</button>
+            <button id="stipend-btn" class="stipend-btn" title="Claim today's free botcoin" hidden>Claim +100</button>
             <div id="wallet-pop" class="wallet-pop" role="dialog" aria-label="Botcoin" hidden></div>
           </span>
           <button id="leaderboard-btn" class="btn" hidden>Leaderboard</button>
@@ -141,6 +141,7 @@
         <strong>Leaderboard</strong>
         <span id="ladder-wallet" class="ladder-wallet" hidden></span>
         <span id="ladder-meta" class="muted"></span>
+        <button id="end-season-btn" class="btn ghost small danger" title="End the season: top-8 playoff, then a fresh ladder">End season</button>
         <button id="bets-btn" class="btn ghost small" title="Recent botcoin bets on the ladder">Bets</button>
         <button id="ladder-refresh" class="btn ghost small">Refresh</button>
         <button id="close-ladder" class="btn ghost small" aria-label="Close">✕</button>
@@ -148,6 +149,17 @@
       <div class="ladder-body">
         <div id="season-bar" class="season-bar" role="tablist" aria-label="Season" hidden></div>
         <div id="season-note" class="muted season-note" hidden></div>
+        <form id="end-season" class="end-season" hidden>
+          <p>Ending <strong id="end-season-name">this season</strong> stops the ladder and runs the playoff: the top 8 bots play a
+            knockout bracket (1v8, 4v5, 2v7, 3v6), 5 games per matchup, until one champion is left. Then the season is archived
+            and a new one starts with every bot back at 1200.</p>
+          <div class="end-season-row">
+            <input id="end-season-pass" type="password" placeholder="Password" autocomplete="off" required />
+            <button id="end-season-go" class="btn danger" type="submit">End season &amp; start playoff</button>
+            <button id="end-season-cancel" class="btn ghost" type="button">Cancel</button>
+          </div>
+        </form>
+        <section id="playoff" class="playoff" hidden></section>
         <table class="ladder-table">
           <thead><tr><th>#</th><th>Bot</th><th>Elo</th><th>W-L-D</th><th>Games</th><th>High score</th></tr></thead>
           <tbody id="ladder-rows"></tbody>

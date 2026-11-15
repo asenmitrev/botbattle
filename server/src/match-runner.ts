@@ -61,12 +61,20 @@ export class MatchPool {
     for (let i = 0; i < size; i++) this.spawn();
   }
 
-  readonly run: MatchRunner = (spec) =>
-    new Promise<MatchRun>((resolve, reject) => {
+  readonly run: MatchRunner = (spec) => this.enqueue(spec, false);
+
+  /** Like `run`, but ahead of every waiting match (someone is waiting on the result: a test game). */
+  readonly runFirst: MatchRunner = (spec) => this.enqueue(spec, true);
+
+  private enqueue(spec: MatchSpec, first: boolean): Promise<MatchRun> {
+    return new Promise<MatchRun>((resolve, reject) => {
       if (this.closed) return reject(new Error("match pool closed"));
-      this.waiting.push({ spec, resolve, reject });
+      const p = { spec, resolve, reject };
+      if (first) this.waiting.unshift(p);
+      else this.waiting.push(p);
       this.dispatch();
     });
+  }
 
   private spawn(): void {
     const w = new Worker(new URL("./match-worker.mjs", import.meta.url));

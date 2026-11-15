@@ -394,7 +394,8 @@ describe("botcoin API", () => {
   });
 
   it("wallet, stipend, submission costs, boost and bets", async () => {
-    expect((await call("POST", "/api/wallet", { owner: A })).body).toMatchObject({ exists: false, balance: 0, nextNewBotCost: 0 });
+    // The first visit opens the wallet; the first bot is still free.
+    expect((await call("POST", "/api/wallet", { owner: A })).body).toMatchObject({ exists: true, balance: 100, nextNewBotCost: 0 });
     expect((await call("POST", "/api/bots", { name: "coin-bot", code: STARTER })).status).toBe(400); // new bots need a key
     const first = await call("POST", "/api/bots", { name: "coin-bot", code: STARTER, owner: A });
     expect(first.status).toBe(201);
@@ -403,8 +404,8 @@ describe("botcoin API", () => {
     let w = (await call("POST", "/api/wallet", { owner: A })).body;
     expect(w.exists).toBe(true);
     expect(w.bots).toEqual([{ id: first.body.id, name: "coin-bot", nextUpdateCost: 0 }]);
-    const afterPlacement = w.balance; // 100 + win/draw payouts from placement games
-    expect(afterPlacement).toBeGreaterThanOrEqual(100);
+    const afterPlacement = w.balance;
+    expect(afterPlacement).toBe(100); // placement games pay nothing
 
     // Broken code is never charged.
     const broken = await call("POST", "/api/bots", { name: "coin-two", code: "export function onTick( {", owner: A });
@@ -412,7 +413,7 @@ describe("botcoin API", () => {
     expect((await call("POST", "/api/wallet", { owner: A })).body.balance).toBe(afterPlacement);
 
     // Stipend once a day.
-    expect((await call("POST", "/api/wallet/stipend", { owner: A })).body.balance).toBeCloseTo(afterPlacement + 20, 2);
+    expect((await call("POST", "/api/wallet/stipend", { owner: A })).body.balance).toBeCloseTo(afterPlacement + 100, 2);
     expect((await call("POST", "/api/wallet/stipend", { owner: A })).status).toBe(409);
     expect((await call("POST", "/api/wallet/stipend", { owner: B })).status).toBe(404);
 
@@ -427,7 +428,7 @@ describe("botcoin API", () => {
     const boost = await call("POST", `/api/bots/${id}/boost`, { owner: A, pairs: 2 });
     expect(boost.status).toBe(200);
     expect(boost.body).toMatchObject({ queuedGames: 4, boosted: 2 });
-    expect(boost.body.balance).toBeCloseTo(afterPlacement + 20 - 10, 2);
+    expect(boost.body.balance).toBeCloseTo(afterPlacement + 100 - 10, 2);
     expect(s.scheduler.queue.map((j) => j.reason)).toEqual(["boost", "boost", "boost", "boost", "background"]);
     expect(s.scheduler.queue.slice(0, 4).every((j) => j.p1 === id || j.p2 === id)).toBe(true);
     expect((await call("GET", "/api/leaderboard")).body.find((r: any) => r.id === id).boosted).toBe(2);
@@ -456,5 +457,45 @@ describe("botcoin API", () => {
     const broke = await call("POST", "/api/bots", { name: "coin-three", code: STARTER, owner: A });
     expect(broke.status).toBe(402);
     expect(broke.body).toMatchObject({ cost: 30, balance: 0 });
+  });
+
+  it("test games: played on the server, unrated, 0.5 vs others' bots, free vs house and own bots; code stays private", async () => {
+    const C = "f".repeat(64);
+    const lb = (await call("GET", "/api/leaderboard")).body;
+    const coinBot = lb.find((r: any) => r.name === "coin-bot");
+    expect((await call("GET", `/api/bots/${coinBot.id}/code`)).status).toBe(404);
+    const matchesBefore = s.ladder.data.matches.length;
+
+    expect((await call("POST", "/api/wallet", { owner: C })).body.balance).toBe(100);
+    const g = await call("POST", "/api/test-game", { owner: C, code: STARTER, opponent: coinBot.id, seed: 7, side: 2 });
+    expect(g.status).toBe(200);
+    expect(g.body).toMatchObject({ cost: 0.5, balance: 99.5 });
+    expect(g.body.replay.bots).toEqual(["coin-bot", "my-bot"]);
+    expect(g.body.replay.result).toBeTruthy();
+    expect(verifyReplay(g.body.replay).ok).toBe(true);
+    expect((await call("POST", "/api/test-game", { owner: C, code: STARTER, opponent: coinBot.id, seed: 8, side: 1 })).body.balance).toBe(99);
+    const ledger = (await call("POST", "/api/wallet", { owner: C })).body.ledger;
+    expect(ledger[0]).toMatchObject({ kind: "test", ref: "coin-bot", delta: -1, count: 2 });
+
+    expect((await call("POST", "/api/test-game", { owner: C, code: STARTER, opponent: "house-idle", seed: 1, side: 1 })).body).toMatchObject({ cost: 0, balance: 99 });
+    // Broken code isn't charged.
+    const broken = await call("POST", "/api/test-game", { owner: C, code: "export function onTick( {", opponent: coinBot.id, seed: 1, side: 1 });
+    expect(broken.status).toBe(400);
+    expect(broken.body.initError).toBe(true);
+    expect((await call("POST", "/api/wallet", { owner: C })).body.balance).toBe(99);
+    // Bad input.
+    expect((await call("POST", "/api/test-game", { owner: C, code: STARTER, opponent: "nope", seed: 1, side: 1 })).status).toBe(404);
+    expect((await call("POST", "/api/test-game", { owner: C, code: STARTER, opponent: coinBot.id, seed: 1, side: 3 })).status).toBe(400);
+    expect((await call("POST", "/api/test-game", { owner: "xyz", code: STARTER, opponent: coinBot.id, seed: 1, side: 1 })).status).toBe(400);
+
+    // A (broke) plays its own bot for free, but can't pay for someone else's.
+    expect((await call("POST", "/api/test-game", { owner: A, code: STARTER, opponent: coinBot.id, seed: 1, side: 1 })).body).toMatchObject({ cost: 0, balance: 0 });
+    const cBot = await call("POST", "/api/bots", { name: "coin-c", code: STARTER, owner: C });
+    expect(cBot.body.cost).toBe(0); // C's first bot is still free though its wallet opened earlier
+    expect((await call("POST", "/api/test-game", { owner: A, code: STARTER, opponent: cBot.body.id, seed: 1, side: 1 })).status).toBe(402);
+
+    // Nothing was rated or recorded by the test games.
+    await s.scheduler.whenIdle();
+    expect(s.ladder.data.matches.every((m, i) => i < matchesBefore || m.p1.id === cBot.body.id || m.p2.id === cBot.body.id)).toBe(true);
   });
 });

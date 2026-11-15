@@ -50,15 +50,14 @@ describe("wallets", () => {
     expect(e.wallet(W)!.balance).toBe(0);
   });
 
-  it("win payouts merge into one ledger line per bot", () => {
+  it("rated games pay no coins (bets are the only game-linked income)", () => {
     const e = new Economy(emptyEconomy());
     e.ensureWallet(W);
-    for (let i = 0; i < 3; i++) e.recordGame(match(`m${i}`, { id: "x", elo: 1200 }, { id: "y", elo: 1200 }, 1), { p1: W, p2: null });
-    e.recordGame(match("m9", { id: "x", elo: 1200 }, { id: "y", elo: 1200 }, "draw"), { p1: W, p2: null });
+    for (let i = 0; i < 3; i++) e.recordGame(match(`m${i}`, { id: "x", elo: 1200 }, { id: "y", elo: 1200 }, 1));
+    e.recordGame(match("m9", { id: "x", elo: 1200 }, { id: "y", elo: 1200 }, "draw"));
     const w = e.wallet(W)!;
-    expect(w.balance).toBe(100.31); // 100 + 3 × 0.1 + 0.01, kept to the cent
-    expect(w.ledger.find((l) => l.kind === "win")!.delta).toBe(0.3);
-    expect(w.ledger.map((l) => [l.kind, l.count ?? 1])).toEqual([["grant", 1], ["win", 3], ["draw", 1]]);
+    expect(w.balance).toBe(ECON.startingGrant);
+    expect(w.ledger.map((l) => l.kind)).toEqual(["grant"]);
   });
 });
 
@@ -81,11 +80,11 @@ describe("bets", () => {
     expect(() => e.placeBet(W, "x", "x", 10, 4)).toThrow(/open bet/);
     expect(e.wallet(W)!.balance).toBe(ECON.startingGrant - 40);
     // Even Elo, 3 wins and a loss → 1.5× → 60. The bot is p2 in some games.
-    e.recordGame(match("m1", { id: "x", elo: 1200 }, { id: "y", elo: 1200 }, 1), { p1: null, p2: null });
-    e.recordGame(match("m2", { id: "y", elo: 1200 }, { id: "x", elo: 1200 }, 2), { p1: null, p2: null });
-    e.recordGame(match("m3", { id: "y", elo: 1200 }, { id: "x", elo: 1200 }, 1), { p1: null, p2: null });
+    e.recordGame(match("m1", { id: "x", elo: 1200 }, { id: "y", elo: 1200 }, 1));
+    e.recordGame(match("m2", { id: "y", elo: 1200 }, { id: "x", elo: 1200 }, 2));
+    e.recordGame(match("m3", { id: "y", elo: 1200 }, { id: "x", elo: 1200 }, 1));
     expect(e.openBet("x")!.counted).toHaveLength(3);
-    e.recordGame(match("m4", { id: "x", elo: 1200 }, { id: "z", elo: 1200 }, 1), { p1: null, p2: null });
+    e.recordGame(match("m4", { id: "x", elo: 1200 }, { id: "z", elo: 1200 }, 1));
     expect(e.openBet("x")).toBeUndefined();
     const bet = e.data.bets[0]!;
     expect(bet.payout).toBe(60);
@@ -123,7 +122,7 @@ describe("submission costs (Ladder)", () => {
 
   it("first bot free, further bots cost, one free update per bot per day", () => {
     const { l, c } = ladder();
-    expect(l.walletView(A).exists).toBe(false);
+    expect(l.walletView(A)).toMatchObject({ exists: true, balance: ECON.startingGrant, nextNewBotCost: 0 }); // opened on first visit
     expect(l.submit("one", "x", { owner: A }).cost).toBe(0);
     expect(bal(l, A)).toBe(ECON.startingGrant);
     expect(l.submit("two", "x", { owner: A }).cost).toBe(ECON.newBotCost);
@@ -154,7 +153,7 @@ describe("submission costs (Ladder)", () => {
     const { l } = ladder();
     l.submit("old", "x", { owner: A });
     delete l.data.economy!.wallets[Object.keys(l.data.economy!.wallets)[0]!];
-    expect(l.walletView(A).exists).toBe(false);
+    expect(Object.keys(l.data.economy!.wallets)).toHaveLength(0);
     expect(l.openLegacyWallets()).toBe(1);
     expect(bal(l, A)).toBe(ECON.startingGrant);
     expect(l.openLegacyWallets()).toBe(0);

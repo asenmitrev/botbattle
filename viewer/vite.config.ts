@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import { build } from "esbuild";
 import { defineConfig, type Plugin } from "vite";
@@ -25,25 +24,9 @@ function botBundle(): Plugin {
   };
 }
 
-/**
- * dist/ladder-bots → data/bots. Lets a running `arena server` (which serves dist/ from disk)
- * hand ladder bot code to the playground without a restart. /api/bots/:id/code is preferred.
- */
-function ladderBotsLink(): Plugin {
-  return {
-    name: "arena-ladder-bots-link",
-    apply: "build",
-    closeBundle() {
-      const link = path.resolve(__dirname, "dist/ladder-bots");
-      fs.rmSync(link, { force: true, recursive: true });
-      fs.symlinkSync(path.relative(path.dirname(link), path.resolve(__dirname, "../data/bots")), link, "dir");
-    },
-  };
-}
-
 export default defineConfig({
   base: "./",
-  plugins: [botBundle(), ladderBotsLink()],
+  plugins: [botBundle()],
   // `pnpm playground` talks to a local ladder (`arena server`) if one is running on 8787.
   server: { fs: { allow: [".."] }, proxy: { "/api": "http://127.0.0.1:8787" } },
   worker: { format: "es" },

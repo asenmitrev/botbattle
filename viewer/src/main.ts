@@ -1,6 +1,6 @@
 import "./style.css";
 import { marked } from "marked";
-import { CONFIG, runMatch, type GameEvent, type GameState, type PlayerId, type Replay } from "@arena/engine";
+import { CONFIG, runMatch, type GameEvent, type GameState, type MatchResult, type PlayerId, type Replay } from "@arena/engine";
 import botApiMarkdown from "../../BOT_API.md?raw";
 import { SAMPLE_BOTS, STARTER_SOURCE } from "./bots.js";
 import { LineChart } from "./charts.js";
@@ -8,7 +8,7 @@ import { createEditor } from "./editor.js";
 import { BoardRenderer, type RenderOptions } from "./renderer.js";
 import { ReplayModel, type Series } from "./replay-model.js";
 import { WorkerBot } from "./worker-bot.js";
-import { initLadder } from "./ladder.js";
+import { initLadder, owner } from "./ladder.js";
 import { SPRITE_URLS } from "./sprites.js";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -91,7 +91,6 @@ opponentSel.value = settings.opponent && SAMPLE_BOTS[settings.opponent] ? settin
 // Ladder (user) bots join the list when the page is served by `arena server`. Value: "ladder:<id>".
 const LADDER_PREFIX = "ladder:";
 const ladderNames = new Map<string, string>();
-const ladderCode = new Map<string, Promise<string>>();
 let ladderGroup: HTMLOptGroupElement | null = null;
 /** (Re)build the "Ladder bots" group. Safe to call again, e.g. after a bot is deleted. */
 async function loadLadderBots(): Promise<void> {
@@ -116,7 +115,7 @@ async function loadLadderBots(): Promise<void> {
   group.label = "Ladder bots";
   for (const b of users) {
     ladderNames.set(b.id, b.name);
-    group.append(new Option(`${b.name} (${Math.round(b.elo)})`, LADDER_PREFIX + b.id));
+    group.append(new Option(`${b.name} (${Math.round(b.elo)}) · server`, LADDER_PREFIX + b.id));
   }
   opponentSel.append(group);
   const want = current.startsWith(LADDER_PREFIX) ? current : settings.opponent;
@@ -128,28 +127,6 @@ function opponentName(value: string): string {
   return value.startsWith(LADDER_PREFIX) ? (ladderNames.get(value.slice(LADDER_PREFIX.length)) ?? value) : value;
 }
 
-/** Source for an opponent: bundled house bot, or a ladder bot's current code fetched from the server. */
-function opponentSource(value: string): Promise<string> {
-  if (!value.startsWith(LADDER_PREFIX)) return Promise.resolve(SAMPLE_BOTS[value]!);
-  const id = value.slice(LADDER_PREFIX.length);
-  let p = ladderCode.get(id);
-  if (!p) {
-    p = (async () => {
-      const api = await fetch(`/api/bots/${encodeURIComponent(id)}/code`, { cache: "no-store" });
-      if (api.ok) return ((await api.json()) as { code: string }).code;
-      // Older servers without the code endpoint serve data/bots via dist/ladder-bots.
-      const file = await fetch(`ladder-bots/${encodeURIComponent(id)}.js`, { cache: "no-store" });
-      if (!file.ok) throw new Error(`couldn't load ${opponentName(value)}'s code (HTTP ${file.status})`);
-      return file.text();
-    })();
-    p.catch(() => {
-      ladderCode.delete(id);
-      void loadLadderBots(); // it may have been deleted from the ladder: prune the list
-    });
-    ladderCode.set(id, p);
-  }
-  return p;
-}
 const sideSel = $<HTMLSelectElement>("side-select");
 sideSel.value = settings.side === "2" ? "2" : "1";
 const seedInput = $<HTMLInputElement>("seed-input");
@@ -167,14 +144,17 @@ function status(text: string, kind: "" | "err" | "ok" = ""): void {
 // ------------------------------------------------------------------ running matches in the browser sandbox
 let running = false;
 
-async function playMatch(seed: number, side: PlayerId, opponentValue: string, onProgress?: (tick: number) => void) {
+type MatchOutcome = { initError: string } | { replay: Replay; result: MatchResult; cost: number };
+
+/** House bots play here, in Web Workers. Ladder bots play on the server: their code never comes to the browser. */
+async function playMatch(seed: number, side: PlayerId, opponentValue: string, onProgress?: (tick: number) => void): Promise<MatchOutcome> {
+  if (opponentValue.startsWith(LADDER_PREFIX)) return playOnServer(seed, side, opponentValue.slice(LADDER_PREFIX.length));
   const opponent = opponentName(opponentValue);
-  const theirSource = await opponentSource(opponentValue);
   const mine = await WorkerBot.create("my-bot", code, (seed * 2 + side) >>> 0);
   const other = side === 1 ? 2 : 1;
-  const theirs = await WorkerBot.create(opponent, theirSource, (seed * 2 + other) >>> 0);
+  const theirs = await WorkerBot.create(opponent, SAMPLE_BOTS[opponentValue]!, (seed * 2 + other) >>> 0);
   try {
-    if (mine.initError) return { initError: mine.initError } as const;
+    if (mine.initError) return { initError: mine.initError };
     const bots = side === 1 ? ([mine, theirs] as const) : ([theirs, mine] as const);
     let n = 0;
     const res = await runMatch([bots[0], bots[1]], {
@@ -184,12 +164,31 @@ async function playMatch(seed: number, side: PlayerId, opponentValue: string, on
       },
     });
     res.replay.bots = side === 1 ? ["my-bot", opponent] : [opponent, "my-bot"];
-    return { replay: res.replay, state: res.state } as const;
+    return { replay: res.replay, result: res.state.result!, cost: 0 };
   } finally {
     mine.dispose();
     theirs.dispose();
   }
 }
+
+async function playOnServer(seed: number, side: PlayerId, opponentId: string): Promise<MatchOutcome> {
+  const r = await fetch("/api/test-game", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ owner: owner(), code, opponent: opponentId, seed, side }),
+  });
+  const out = (await r.json().catch(() => ({}))) as { replay?: Replay; cost?: number; error?: string; initError?: boolean };
+  if (out.initError) return { initError: out.error ?? "init failed" };
+  if (!r.ok || !out.replay?.result) {
+    if (r.status === 404) void loadLadderBots(); // deleted from the ladder: prune the list
+    throw new Error(out.error ?? `HTTP ${r.status}`);
+  }
+  if (out.cost) window.dispatchEvent(new Event("botcoin-changed"));
+  return { replay: out.replay, result: out.replay.result, cost: out.cost ?? 0 };
+}
+
+/** Status suffix for a paid server game. */
+const paid = (cost: number) => (cost ? ` (server game, ${cost} 🪙)` : "");
 
 function setBusy(b: boolean): void {
   running = b;
@@ -202,7 +201,7 @@ async function runOne(): Promise<void> {
   const seed = Number(seedInput.value) >>> 0;
   const side = Number(sideSel.value) as PlayerId;
   const opponent = opponentName(opponentSel.value);
-  status(`Running my-bot vs ${opponent} on seed ${seed}…`);
+  status(`Running my-bot vs ${opponent} on seed ${seed}${opponentSel.value.startsWith(LADDER_PREFIX) ? " on the server" : ""}…`);
   try {
     const r = await playMatch(seed, side, opponentSel.value, (tick) => status(`Running my-bot vs ${opponent} on seed ${seed}… tick ${tick}`));
     if ("initError" in r) {
@@ -210,7 +209,7 @@ async function runOne(): Promise<void> {
       return;
     }
     showReplay(r.replay);
-    const res = r.state.result!;
+    const res = r.result;
     const errors = r.replay.ticks.flatMap((x) => x.runnerEvents ?? []).filter((e) => e.type === "bot_error" && e.player === side).length;
     const invalid = r.replay.ticks.flatMap((x) => x.events).filter((e) => e.type === "invalid_action" && e.player === side).length;
     const outcome = res.winner === "draw" ? "Draw" : res.winner === side ? "You win" : "You lose";
@@ -219,6 +218,7 @@ async function runOne(): Promise<void> {
       `${outcome} — ${res.reason.replace("_", " ")} at tick ${res.tick}, ` +
         (res.units ? `units ${res.units[side - 1]} vs ${res.units[2 - side]}, ` : "") +
         `score ${res.scores[side - 1]} vs ${res.scores[2 - side]}` +
+        paid(r.cost) +
         (tail ? `\n${tail} (see Problems)` : ""),
       res.winner === side ? "ok" : res.winner === "draw" ? "" : "err",
     );
@@ -240,6 +240,7 @@ async function runBench(): Promise<void> {
   let d = 0;
   let firstLoss: Replay | null = null;
   let last: Replay | null = null;
+  let spent = 0;
   try {
     for (let i = 0; i < 10; i++) {
       const seed = 1 + Math.floor(i / 2);
@@ -251,7 +252,8 @@ async function runBench(): Promise<void> {
         return;
       }
       last = r.replay;
-      const win = r.state.result!.winner;
+      spent += r.cost;
+      const win = r.result.winner;
       if (win === "draw") d++;
       else if (win === side) w++;
       else {
@@ -261,7 +263,7 @@ async function runBench(): Promise<void> {
     }
     const shown = firstLoss ?? last!;
     showReplay(shown);
-    status(`vs ${opponent}: ${w} wins, ${l} losses, ${d} draws over 10 games.` + (firstLoss ? "\nShowing your first loss." : ""), w > l ? "ok" : l > w ? "err" : "");
+    status(`vs ${opponent}: ${w} wins, ${l} losses, ${d} draws over 10 games.` + paid(Math.round(spent * 100) / 100) + (firstLoss ? "\nShowing your first loss." : ""), w > l ? "ok" : l > w ? "err" : "");
   } catch (e) {
     status(`Benchmark crashed: ${e instanceof Error ? e.message : String(e)}`, "err");
   } finally {
@@ -605,8 +607,7 @@ for (const el of document.querySelectorAll<HTMLElement>(".chart")) ro.observe(el
 
 // ------------------------------------------------------------------ ranked ladder (only when served by `arena server`)
 void initLadder({
-  botDeleted: (id) => {
-    ladderCode.delete(id);
+  botDeleted: () => {
     void loadLadderBots().then(persistSettings);
   },
   getCode: () => code,
