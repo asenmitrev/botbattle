@@ -2,6 +2,7 @@
 
 > Suggestions only; game deployments and resets are not controlled here.
 
+
 ## Summary
 
 _AI-generated on 2026-11-16 (gpt-6.1-sol); may be imperfect. Original submissions are preserved below._
@@ -49,10 +50,9 @@ Players want new siege and archer units, related upgrades, and adjustments to un
 
 - [S3-009](#s3-009) make it so that when the bet is paid out, we actually double the winnings, right now I think it does nothing?
 
-**💡 Other** (2)
+**💡 Other** (1)
 
 - [S3-020](#s3-020) Шодя при счетоводителкара
-- [S3-021](#s3-021) Дайте ми линка че съм валекс
 
 
 ## Suggestions
@@ -234,15 +234,4 @@ Original submissions, verbatim.
 
 
 > Шодя при счетоводителкара
-
-
-### S3-021
-
-- Submitted by: Me
-- Captured at (UTC): 2026-11-15T14:00:16.410294+00:00
-- Status: Proposed
-- Telegram reference: chat -1004294722012, message 569
-
-
-> Дайте ми линка че съм валекс
 
