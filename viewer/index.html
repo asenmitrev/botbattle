@@ -80,11 +80,19 @@
               <div class="tabs" role="tablist">
                 <button class="tab active" data-tab="logs" role="tab">Bot logs</button>
                 <button class="tab" data-tab="problems" role="tab">Problems <span id="problem-count" class="badge">0</span></button>
+                <button class="tab" data-tab="stats" role="tab">Match stats</button>
               </div>
-              <label class="check"><input id="log-p1" type="checkbox" checked /><span class="dot p1"></span>P1</label>
-              <label class="check"><input id="log-p2" type="checkbox" checked /><span class="dot p2"></span>P2</label>
+              <span class="log-filter">
+                <label class="check"><input id="log-p1" type="checkbox" checked /><span class="dot p1"></span>P1</label>
+                <label class="check"><input id="log-p2" type="checkbox" checked /><span class="dot p2"></span>P2</label>
+              </span>
+              <div class="seg stats-scope" role="radiogroup" aria-label="Stats range" hidden>
+                <label title="Everything up to the tick on screen"><input type="radio" name="stats-scope" value="tick" checked />So far</label>
+                <label title="The whole match, whatever tick is on screen"><input type="radio" name="stats-scope" value="match" />Whole match</label>
+              </div>
             </div>
             <div id="log-list" class="log-list mono" role="log"></div>
+            <div id="match-stats" class="match-stats" hidden></div>
           </div>
         </section>
 

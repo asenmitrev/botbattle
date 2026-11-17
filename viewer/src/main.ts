@@ -1,6 +1,21 @@
 import "./style.css";
 import { marked } from "marked";
-import { CONFIG, STRUCTURE_TYPES, UNIT_TYPES, UPGRADE_TYPES, runMatch, type GameEvent, type GameState, type MatchResult, type PlayerId, type Replay } from "@arena/engine";
+import {
+  CONFIG,
+  STRUCTURE_TYPES,
+  UNIT_TYPES,
+  UPGRADE_TYPES,
+  countTotal,
+  matrixTotal,
+  runMatch,
+  type GameEvent,
+  type GameState,
+  type KillMatrix,
+  type MatchResult,
+  type PlayerId,
+  type PlayerMatchStats,
+  type Replay,
+} from "@arena/engine";
 import readmeSource from "../../README.md?raw";
 import { SAMPLE_BOTS, STARTER_SOURCE } from "./bots.js";
 import { LineChart } from "./charts.js";
@@ -37,7 +52,8 @@ let t = 0;
 let playing = false;
 let lastFrame = 0;
 let acc = 0;
-let logTab: "logs" | "problems" = "logs";
+let logTab: "logs" | "problems" | "stats" = "logs";
+let statsScope: "tick" | "match" = "tick";
 const opts: RenderOptions = { fog: 0, marks: true, attacks: true };
 
 const board = new BoardRenderer($<HTMLCanvasElement>("board"));
@@ -490,9 +506,16 @@ function buildLogIndex(): void {
 }
 
 function renderLogs(): void {
+  const tab = logTab;
+  const statsTab = tab === "stats";
+  $("log-list").hidden = statsTab;
+  $("match-stats").hidden = !statsTab;
+  document.querySelector<HTMLElement>(".log-filter")!.hidden = statsTab;
+  document.querySelector<HTMLElement>(".stats-scope")!.hidden = !statsTab;
+  if (tab === "stats") return renderMatchStats();
   const show1 = $<HTMLInputElement>("log-p1").checked;
   const show2 = $<HTMLInputElement>("log-p2").checked;
-  const list = logIndex[logTab].filter((e) => e.t < t && (e.player === 1 ? show1 : show2)).slice(-300);
+  const list = logIndex[tab].filter((e) => e.t < t && (e.player === 1 ? show1 : show2)).slice(-300);
   const el = $("log-list");
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
   el.innerHTML = list.length
@@ -512,12 +535,118 @@ $("log-list").addEventListener("click", (e) => {
 });
 for (const tab of document.querySelectorAll<HTMLButtonElement>(".tab")) {
   tab.addEventListener("click", () => {
-    logTab = tab.dataset.tab as "logs" | "problems";
+    logTab = tab.dataset.tab as typeof logTab;
     for (const x of document.querySelectorAll(".tab")) x.classList.toggle("active", x === tab);
     renderLogs();
   });
 }
 for (const id of ["log-p1", "log-p2"]) $(id).addEventListener("change", renderLogs);
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name="stats-scope"]')) {
+  r.addEventListener("change", () => {
+    statsScope = r.value as typeof statsScope;
+    renderLogs();
+  });
+}
+
+// ------------------------------------------------------------------ match stats tab
+const VICTIMS = [...UNIT_TYPES, ...STRUCTURE_TYPES, "base"] as const;
+const KILLERS = [...UNIT_TYPES, ...STRUCTURE_TYPES, "zone", "unknown"] as const;
+type Row = [label: string, value: (p: PlayerMatchStats) => number | string];
+
+/** A number cell; zeros are dimmed so the non-zero numbers stand out. */
+const num = (n: number) => (n ? String(n) : `<span class="zero">0</span>`);
+const plural = (type: string) => `${title(type)}s`;
+const tickOf = (n: number | null) => (n === null ? `<span class="zero">–</span>` : `t${n}`);
+const get = (c: Partial<Record<string, number>>, k: string) => c[k] ?? 0;
+
+/** A card with a P1 | P2 table. With `skipZero`, rows that are 0 for both players are left out. */
+function pairCard(heading: string, rows: Row[], players: readonly PlayerMatchStats[], skipZero = false): string {
+  const names = model!.replay.bots;
+  const body = rows
+    .filter(([, f]) => !skipZero || players.some((p) => f(p) !== 0))
+    .map(([label, f]) => `<tr><td>${label}</td>${players.map((p) => { const v = f(p); return `<td>${typeof v === "number" ? num(v) : v}</td>`; }).join("")}</tr>`)
+    .join("");
+  const head = names.map((n, i) => `<th><span class="dot p${i + 1}"></span> <span class="name" title="${esc(n)}">${esc(n)}</span></th>`).join("");
+  return `<section class="ms-card"><h4>${heading}</h4><table class="stats-table"><thead><tr><th></th>${head}</tr></thead>
+    <tbody>${body || `<tr><td colspan="3">Nothing yet</td></tr>`}</tbody></table></section>`;
+}
+
+/** Victim type × killer type, showing only the rows and columns that have something in them. */
+function matrixCard(heading: string, p: PlayerId, m: KillMatrix, empty: string): string {
+  const rows = VICTIMS.filter((v) => countTotal(m[v]));
+  const cols = KILLERS.filter((k) => rows.some((v) => m[v]?.[k]));
+  const head = `<span class="dot p${p}"></span> ${heading} <span class="ms-total">${matrixTotal(m)}</span>`;
+  if (!rows.length) return `<section class="ms-card"><h4>${head}</h4><div class="ms-empty">${empty}</div></section>`;
+  const colTotal = (k: (typeof KILLERS)[number]) => rows.reduce((n, v) => n + (m[v]?.[k] ?? 0), 0);
+  const totalRow = rows.length > 1 ? `<tr class="total"><td>Total</td>${cols.map((k) => `<td>${colTotal(k)}</td>`).join("")}<td>${matrixTotal(m)}</td></tr>` : "";
+  return `<section class="ms-card"><h4>${head}</h4><table class="stats-table">
+    <thead><tr><th title="victim type, by what killed it">Victim · by</th>${cols.map((k) => `<th>${title(k)}</th>`).join("")}<th>All</th></tr></thead>
+    <tbody>${rows.map((v) => `<tr><td>${plural(v)}</td>${cols.map((k) => `<td>${num(m[v]?.[k] ?? 0)}</td>`).join("")}<td>${countTotal(m[v])}</td></tr>`).join("")}${totalRow}</tbody>
+    </table></section>`;
+}
+
+function renderMatchStats(): void {
+  const el = $("match-stats");
+  if (!model) return void (el.innerHTML = `<div class="log-empty">Run a match or open a replay to see its stats.</div>`);
+  const whole = statsScope === "match";
+  const st = whole ? model.finalStats : model.statsAt(t);
+  const names = model.replay.bots;
+  const players = st.players;
+  const killSplit = (m: KillMatrix) => {
+    const [u, s, b] = [matrixTotal(m, UNIT_TYPES), matrixTotal(m, STRUCTURE_TYPES), matrixTotal(m, ["base"])];
+    return `${num(u + s + b)} <span class="ms-split" title="units · structures · bases">${u}·${s}·${b}</span>`;
+  };
+  const upgrades = (p: PlayerMatchStats) =>
+    p.upgrades.length ? p.upgrades.map((u) => `${esc(u.upgrade)} <span class="ms-split">t${u.tick}</span>`).join("<br>") : `<span class="zero">–</span>`;
+  const reasons = (p: PlayerMatchStats) => {
+    const top = Object.entries(p.invalidReasons).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    return top.length ? top.map(([r, n]) => `<div class="ms-reason" title="${esc(r)}">${n}× ${esc(r)}</div>`).join("") : `<span class="zero">–</span>`;
+  };
+  const dealers = [...UNIT_TYPES, ...STRUCTURE_TYPES];
+
+  const army = pairCard("Army", [
+    ["Kills", (p) => killSplit(p.kills)],
+    ["Losses", (p) => killSplit(p.losses)],
+    ["First kill", (p) => tickOf(p.firstKillTick)],
+    ...UNIT_TYPES.map((u): Row => [`${plural(u)} spawned`, (p) => get(p.spawned, u)]),
+    ...[...STRUCTURE_TYPES, "base"].map((b): Row => [`${plural(b)} built`, (p) => get(p.built, b)]),
+    ["Upgrades", upgrades],
+    ["Peak units", (p) => p.peakUnits],
+    ["Peak army", (p) => p.peakArmy],
+  ], players);
+  const damage = pairCard("Damage", [
+    ["Dealt", (p) => countTotal(p.damageDealt)],
+    ...dealers.map((k): Row => [`<span class="ms-sub">by ${plural(k).toLowerCase()}</span>`, (p) => get(p.damageDealt, k)]),
+    [`<span class="ms-sub">to bases</span>`, (p) => get(p.damageDealtTo, "base")],
+    ["Taken", (p) => countTotal(p.damageTaken)],
+    ...[...dealers, "zone"].map((k): Row => [`<span class="ms-sub">from ${k === "zone" ? "the zone" : plural(k).toLowerCase()}</span>`, (p) => get(p.damageTaken, k)]),
+  ], players, true);
+  const economy = pairCard("Economy", [
+    ["Energy harvested", (p) => p.harvested.energy],
+    ["Energy deposited", (p) => p.deposited.energy],
+    ["Energy spent", (p) => p.spent.energy],
+    ["Crystal harvested", (p) => p.harvested.crystal],
+    ["Crystal deposited", (p) => p.deposited.crystal],
+    ["Crystal spent", (p) => p.spent.crystal],
+  ], players);
+  const problems = pairCard("Problems", [
+    ["Invalid actions", (p) => p.invalidActions],
+    ["Bot errors", (p) => p.botErrors],
+    ["Top reasons", reasons],
+  ], players);
+  const matrices = (["kills", "losses"] as const)
+    .flatMap((k) => ([1, 2] as PlayerId[]).map((p) => matrixCard(`${esc(names[p - 1]!)} · ${k}`, p, players[p - 1]![k], k === "kills" ? "No kills yet" : "No losses yet")))
+    .join("");
+
+  const range = st.ticks ? `ticks 0–${st.ticks - 1}` : "nothing has happened yet";
+  const scroll = el.scrollTop;
+  el.innerHTML = `
+    <div class="ms-summary">${whole ? "Whole match" : "So far"}: ${range} · first contact ${tickOf(st.firstContactTick)} · first death ${tickOf(st.firstDeathTick)}</div>
+    <div class="ms-grid">${army}${matrices}${damage}${economy}${problems}</div>
+    <div class="ms-note">A kill goes to the attacker that dealt the victim the most damage on the tick it died (ties: the first attacker).
+      Anything the zone hit on the tick it died is a zone kill. Kills show units · structures · bases.</div>`;
+  el.scrollTop = scroll;
+}
 
 // ------------------------------------------------------------------ hover info
 $("board").addEventListener("mousemove", (e) => {

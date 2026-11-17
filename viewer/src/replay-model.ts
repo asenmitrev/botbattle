@@ -5,7 +5,9 @@ import {
   hashState,
   step,
   forfeit,
+  MatchStatsTracker,
   type GameEvent,
+  type MatchStats,
   type GameState,
   type PlayerId,
   type Replay,
@@ -26,6 +28,8 @@ export class ReplayModel {
   readonly states: GameState[] = [];
   readonly series: Series;
   readonly verified: boolean;
+  private tracker: MatchStatsTracker | null = null;
+  private final: MatchStats | null = null;
 
   constructor(readonly replay: Replay) {
     if (replay.configVersion !== CONFIG_VERSION) {
@@ -56,6 +60,25 @@ export class ReplayModel {
 
   get lastIndex(): number {
     return this.states.length - 1;
+  }
+
+  /**
+   * Match stats (kills, losses, economy, damage, …) from the events that produced states[0..t], i.e. ticks
+   * 0..t-1. Sequential calls (playback) extend one tracker incrementally; seeking backwards restarts it.
+   */
+  statsAt(t: number): MatchStats {
+    t = Math.max(0, Math.min(this.lastIndex, t));
+    if (!this.tracker || this.tracker.ticks > t) this.tracker = new MatchStatsTracker(this.states[0]!);
+    while (this.tracker.ticks < t) {
+      const i = this.tracker.ticks;
+      this.tracker.add(this.replay.ticks[i]!.tick, this.eventsAt(i + 1));
+    }
+    return this.tracker.snapshot();
+  }
+
+  /** Stats for the whole match (cached). */
+  get finalStats(): MatchStats {
+    return (this.final ??= this.statsAt(this.lastIndex));
   }
 
   eventsAt(t: number): GameEvent[] {

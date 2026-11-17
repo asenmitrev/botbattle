@@ -102,6 +102,30 @@ body.split-dragging .pane { pointer-events: none; }
 .log-row .who.p2 { color: var(--p2); }
 .log-row.err .msg { color: #ff8f8f; }
 .log-empty { color: var(--text-muted); padding: 8px 0; }
+.logs-head { flex-wrap: wrap; row-gap: 4px; }
+.log-filter { display: inline-flex; gap: 12px; }
+.log-filter[hidden], .stats-scope[hidden], .match-stats[hidden] { display: none; }
+
+/* ---- match stats tab (inside .logs) */
+.match-stats { flex: 1; overflow: auto; padding: 6px 8px 8px; max-height: 440px; }
+/* The stats tab needs more room than a log list: let the left pane scroll instead of squeezing it. */
+.logs:has(.match-stats:not([hidden])) { flex-basis: 380px; min-height: 380px; }
+.ms-card .stats-table td:first-child { white-space: nowrap; }
+.ms-summary { color: var(--text-secondary); font-size: 12px; margin-bottom: 6px; }
+/* Cards flow in columns (no gaps under short cards); one column at narrow widths. */
+.ms-grid { columns: 260px; column-gap: 8px; }
+.ms-card { break-inside: avoid; margin-bottom: 8px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; min-width: 0; overflow-x: auto; }
+.ms-card h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-card .stats-table { font-size: 12px; }
+.ms-card .stats-table td { vertical-align: top; }
+.ms-card .stats-table tr.total td { border-top: 1px solid var(--border); color: var(--text-secondary); }
+.ms-card .zero { color: var(--text-muted); opacity: .6; }
+.ms-total { color: var(--text-primary); margin-left: auto; font-variant-numeric: tabular-nums; }
+.ms-split { color: var(--text-muted); font-size: 11px; }
+.ms-sub { padding-left: 10px; }
+.ms-empty { color: var(--text-muted); font-size: 12px; padding: 2px 0; }
+.ms-reason { max-width: 140px; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #ff8f8f; }
+.ms-note { color: var(--text-muted); font-size: 11px; margin-top: 8px; }
 
 .runbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .runbar label { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); }
