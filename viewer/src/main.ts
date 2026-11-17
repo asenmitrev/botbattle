@@ -51,6 +51,9 @@ $("legend").innerHTML = (
     ["turret", "Turret"],
     ["wall", "Wall"],
     ["base", "Base"],
+    ["fighter_up", "Upgraded fighter"],
+    ["scout_up", "Upgraded scout"],
+    ["wall_up", "Upgraded wall"],
   ] as const
 )
   .map(([k, label]) => `<div class="legend-item"><img src="${SPRITE_URLS[k]}" alt="" /><span>${label}</span></div>`)

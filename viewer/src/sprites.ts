@@ -5,9 +5,29 @@ import scout from "./sprites/scout.png";
 import turret from "./sprites/turret.png";
 import wall from "./sprites/wall.png";
 import base from "./sprites/base.png";
+// Upgraded variants (fal.ai edits of the base art: heavier armour, cyan glow).
+import fighterUp from "./sprites/fighter_up.png";
+import scoutUp from "./sprites/scout_up.png";
+import wallUp from "./sprites/wall_up.png";
 
-export const SPRITE_URLS = { worker, fighter, scout, turret, wall, base } as const;
+export const SPRITE_URLS = {
+  worker,
+  fighter,
+  scout,
+  turret,
+  wall,
+  base,
+  fighter_up: fighterUp,
+  scout_up: scoutUp,
+  wall_up: wallUp,
+} as const;
 export type SpriteName = keyof typeof SPRITE_URLS;
+
+/** The sprite for an entity: its upgraded art when it is upgraded and has one, else the base art. */
+export const spriteFor = (type: string, upgraded?: boolean): SpriteName => {
+  const up = `${type}_up`;
+  return (upgraded && up in SPRITE_URLS ? up : type) as SpriteName;
+};
 
 const images = new Map<SpriteName, HTMLImageElement>();
 const listeners: Array<() => void> = [];

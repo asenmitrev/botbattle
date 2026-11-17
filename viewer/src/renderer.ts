@@ -1,5 +1,5 @@
 import { CONFIG, computeVisibility, maxHp, TILE, zoneCenter, zoneRadius, type GameEvent, type GameState, type PlayerId } from "@arena/engine";
-import { onSpriteLoad, sprite, tintedSprite, type SpriteName } from "./sprites.js";
+import { onSpriteLoad, sprite, spriteFor, tintedSprite, type SpriteName } from "./sprites.js";
 
 export const COLORS = {
   p1: "#3987e5",
@@ -176,7 +176,7 @@ export class BoardRenderer {
       const x = s.x * c;
       const y = s.y * c;
       if (s.type === "wall") {
-        if (!this.sprite("wall", x + c / 2, y + c / 2, c)) {
+        if (!this.sprite(spriteFor("wall", s.upgraded), x + c / 2, y + c / 2, c)) {
           ctx.fillStyle = "#6b6a63";
           ctx.fillRect(x + 1, y + 1, c - 2, c - 2);
         }
@@ -218,11 +218,12 @@ export class BoardRenderer {
       const col = playerColor(u.owner);
       const cx = u.x * c + c / 2;
       const cy = u.y * c + c / 2;
-      const img = tintedSprite(u.type, col);
+      // Upgraded units keep more of their art so the cyan glow survives the team tint.
+      const img = tintedSprite(spriteFor(u.type, u.upgraded), col, u.upgraded ? 0.5 : 0.3);
       if (img) {
         // Faction-tinted art, no backing plate. Size encodes role:
         // workers are small, fighters loom over their tile, scouts sit in between.
-        const size = c * (u.type === "worker" ? 0.85 : u.type === "fighter" ? 1.3 : 1.05);
+        const size = c * (u.type === "worker" ? 0.85 : u.type === "fighter" ? 1.3 : 1.05) * (u.upgraded ? 1.12 : 1);
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
