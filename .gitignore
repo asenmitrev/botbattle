@@ -18,3 +18,4 @@ botbattle/
 .env
 .env.*
 coverage/
+.claude/worktrees/
