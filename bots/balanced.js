@@ -4,10 +4,13 @@ import {
   crystalWorkerAct,
   enemyBasePos,
   explore,
+  exploreUnknown,
   fighterAct,
   go,
+  knownNodes,
   nearestEnemyUnit,
   observe,
+  searchWaypoints,
   workerAct,
 } from "./lib/common.js";
 import { distance, inSafeZone, manhattan } from "./lib/helpers.js";
@@ -104,12 +107,17 @@ export function onTick(state, memory) {
     if (a) actions.push(a);
   }
 
-  // ---- scouts: sweep the center, then watch the enemy approach
+  // ---- scouts: find crystal (it can be anywhere), then watch the enemy approach from the center
   for (const u of scouts) {
     if (late && !inSafeZone(state, u, 3)) {
       actions.push(go(state, memory, u, center));
       continue;
     }
+    if (knownNodes(memory, "crystal").length === 0) {
+      actions.push(exploreUnknown(state, memory, u, searchWaypoints(state)));
+      continue;
+    }
+    if (memory.seek) delete memory.seek[u.id];
     const wps = [center, { x: Math.round((center.x + enemyBase.x) / 2), y: Math.round((center.y + enemyBase.y) / 2) }, center];
     actions.push(explore(state, memory, u, wps));
   }

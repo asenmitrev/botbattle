@@ -96,24 +96,27 @@ function tryGenerate(rng: Rng): Omit<GeneratedMap, "attempts"> | null {
     setSym(p.x, p.y, TILE.energy_node);
   }
 
-  // 5. Crystal nodes in mirrored pairs near the center.
-  const center = { x: (size - 1) / 2, y: (size - 1) / 2 };
+  // 5. Crystal nodes in mirrored pairs anywhere on the map, away from both starting bases.
+  // Distances to b1 and b2 swap under the mirror, so a tile passes iff its twin does.
   const pairs = rng.int(cfg.crystalPairsMin, cfg.crystalPairsMax);
   const crystalHalf: Pos[] = [];
-  for (let k = 0; k < pairs; k++) {
-    const ok: Pos[] = [];
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const p = { x, y };
-        if (grid[idx(x, y)] !== TILE.floor) continue;
-        if (dist2(p, center) > cfg.crystalCenterRadius ** 2) continue;
-        const m = mirror(size, p);
-        if (chebyshev(p, m) < 3) continue;
-        const all = crystalHalf.flatMap((c) => [c, mirror(size, c)]);
-        if (all.some((c) => chebyshev(c, p) < 3 || chebyshev(c, m) < 3)) continue;
-        ok.push(p);
-      }
+  const crystalCandidates: Pos[] = [];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const p = { x, y };
+      if (grid[idx(x, y)] !== TILE.floor) continue;
+      if (dist2(p, b1) < cfg.crystalMinBaseDist ** 2 || dist2(p, b2) < cfg.crystalMinBaseDist ** 2) continue;
+      if (chebyshev(p, mirror(size, p)) < cfg.crystalMinSpacing) continue;
+      if (energy.some((e) => chebyshev(e, p) < cfg.crystalMinSpacing || chebyshev(mirror(size, e), p) < cfg.crystalMinSpacing)) continue;
+      crystalCandidates.push(p);
     }
+  }
+  for (let k = 0; k < pairs; k++) {
+    const placed = crystalHalf.flatMap((c) => [c, mirror(size, c)]);
+    const ok = crystalCandidates.filter((p) => {
+      const m = mirror(size, p);
+      return placed.every((c) => chebyshev(c, p) >= cfg.crystalMinSpacing && chebyshev(c, m) >= cfg.crystalMinSpacing);
+    });
     if (ok.length === 0) return null;
     const p = rng.pick(ok);
     crystalHalf.push(p);

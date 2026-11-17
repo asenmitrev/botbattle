@@ -91,23 +91,48 @@ export function workerAct(state, memory, u, node) {
   return go(state, memory, u, node);
 }
 
-/** Exploration waypoints around the map center, used to discover crystal. */
-export function centerWaypoints(state) {
-  const c = (state.mapSize - 1) / 2;
+/** Spacing of the search grid: under two worker vision radii, so neighbouring sweeps overlap. */
+const SEARCH_STEP = 8;
+
+/** Crystal can be anywhere on the map, so search a grid of waypoints that covers all of it. */
+export function searchWaypoints(state) {
+  const size = state.mapSize;
   const pts = [];
-  for (const [dx, dy] of [[0, 0], [-5, -5], [5, 5], [-5, 5], [5, -5], [0, -7], [0, 7], [-7, 0], [7, 0]]) {
-    pts.push({ x: Math.round(c + dx), y: Math.round(c + dy) });
+  for (let y = SEARCH_STEP / 2; y < size; y += SEARCH_STEP) {
+    for (let x = SEARCH_STEP / 2; x < size; x += SEARCH_STEP) pts.push({ x, y });
   }
-  // Explore our half first.
-  const mine = state.myBase;
-  return pts.sort((a, b) => manhattan(a, mine) - manhattan(b, mine));
+  return pts;
 }
 
-/** Worker that fetches crystal: explores the center until a crystal node is known. */
+/**
+ * Head for the nearest waypoint whose tile hasn't been seen yet (memory.map, kept by observe),
+ * preferring ones no other unit is heading to. Starting from home, nearest-first sweeps our own
+ * side before the enemy's. Once everything has been seen, cycles through the waypoints.
+ */
+export function exploreUnknown(state, memory, u, waypoints) {
+  const size = state.mapSize;
+  const unseen = (p) => !memory.map || memory.map[p.y * size + p.x] === "?";
+  const alive = new Set(state.myUnits.map((o) => o.id));
+  memory.seek = memory.seek || {};
+  for (const k of Object.keys(memory.seek)) if (!alive.has(Number(k)) || Number(k) === u.id) delete memory.seek[k];
+  const open = waypoints.filter(unseen);
+  if (open.length === 0) return explore(state, memory, u, waypoints);
+  const taken = new Set(Object.values(memory.seek).map((p) => p.x + "," + p.y));
+  const free = open.filter((p) => !taken.has(p.x + "," + p.y));
+  const pool = free.length ? free : open;
+  pool.sort((a, b) => manhattan(a, u) - manhattan(b, u) || a.y - b.y || a.x - b.x);
+  memory.seek[u.id] = pool[0];
+  return go(state, memory, u, pool[0]);
+}
+
+/** Worker that fetches crystal: searches the map until a crystal node is known. */
 export function crystalWorkerAct(state, memory, u) {
   const node = assignNode(state, memory, u, "crystal", 4);
-  if (node || u.cargo.energy + u.cargo.crystal > 0) return workerAct(state, memory, u, node);
-  return explore(state, memory, u, centerWaypoints(state));
+  if (node || u.cargo.energy + u.cargo.crystal > 0) {
+    if (memory.seek) delete memory.seek[u.id];
+    return workerAct(state, memory, u, node);
+  }
+  return exploreUnknown(state, memory, u, searchWaypoints(state));
 }
 
 export function explore(state, memory, u, waypoints) {

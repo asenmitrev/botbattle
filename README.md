@@ -8,7 +8,7 @@ This file is the whole manual and the only rules document. It is self-contained:
 and ask for a bot. Every number in it comes from `engine/src/config.ts` (or, for the ladder, the server's
 constants) and is checked by a test.
 
-**Rules version <!--v CONFIG_VERSION-->3.0.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
+**Rules version <!--v CONFIG_VERSION-->3.1.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
 
 ## Writing a bot
 
@@ -94,7 +94,10 @@ The simulation is deterministic: the same seed and the same bot actions always p
 - Player 1's starting base is at (<!--v map.baseP1.x-->4<!--/v-->, <!--v map.baseP1.y-->4<!--/v-->), player 2's at (<!--v map.size - 1 - map.baseP1.x-->35<!--/v-->, <!--v map.size - 1 - map.baseP1.y-->35<!--/v-->). All tiles within
   Chebyshev <!--v map.baseClearRadius-->2<!--/v--> of a starting base are floor. Building more bases doesn't change terrain.
 - <!--v map.energyNodesPerSide-->4<!--/v--> energy nodes per side, at Euclidean distance <!--v map.energyNodeMinDist-->3<!--/v-->–<!--v map.energyNodeMaxDist-->8<!--/v--> from that side's base.
-- Crystal nodes come in mirrored pairs within Euclidean <!--v map.crystalCenterRadius-->7<!--/v--> of the center: <!--v map.crystalPairsMin * 2-->2<!--/v--> to <!--v map.crystalPairsMax * 2-->4<!--/v--> in total.
+- Crystal nodes come in mirrored pairs, <!--v map.crystalPairsMin * 2-->2<!--/v--> to <!--v map.crystalPairsMax * 2-->4<!--/v--> in total, and can be anywhere on the map: in the
+  middle, along an edge, or on either side. Each one is at Euclidean distance ≥ <!--v map.crystalMinBaseDist-->10<!--/v--> from both starting
+  bases and at Chebyshev distance ≥ <!--v map.crystalMinSpacing-->3<!--/v--> from every other node (its own mirror twin included). Its twin
+  at (<!--v map.size - 1-->39<!--/v-->−x, <!--v map.size - 1-->39<!--/v-->−y) is the same distance from the other base, so neither player is closer to crystal overall.
 - Generation is retried until a BFS confirms a walkable path from base 1 to base 2 and that every node has a
   reachable adjacent tile.
 - Terrain walls, nodes, bases, structures and units all block movement. Units never share a tile.
@@ -354,7 +357,8 @@ export function onTick(state, memory) {
 ### Tips
 
 - `moveTo` ignores units, so crowds can gridlock. If a unit hasn't moved for a tick or two, step sideways.
-- Fighters need crystal, and crystal comes from the contested center.
+- Fighters need crystal, and crystal can be anywhere: scout for it early. Whatever you find, its twin is at the
+  mirrored position (<!--v map.size - 1-->39<!--/v-->−x, <!--v map.size - 1-->39<!--/v-->−y), so you also know where the enemy's matching crystal is.
 - Late game: move units toward the center or lose them to the zone. Bank cargo before the end, because
   undeposited cargo doesn't score.
 - A pack of fighters next to the enemy base takes it down fast: base HP ÷ (fighters × fighter damage) ticks.

@@ -2,7 +2,7 @@
 // (`pnpm docs`; a test fails while they are stale). Bump CONFIG_VERSION whenever any value below
 // or any rule in step.ts changes: replays record it and only replay under the same version.
 
-export const CONFIG_VERSION = "3.0.0";
+export const CONFIG_VERSION = "3.1.0";
 
 export const CONFIG = {
   map: {
@@ -17,8 +17,13 @@ export const CONFIG = {
     /** Crystal nodes come in mirrored pairs, so the count is 2 or 4. */
     crystalPairsMin: 1,
     crystalPairsMax: 2,
-    /** Crystal nodes are placed within this Euclidean radius of the map center. */
-    crystalCenterRadius: 7,
+    /**
+     * Crystal nodes can land anywhere on the map, but at least this Euclidean distance from both
+     * starting bases (beyond energyNodeMaxDist, so crystal is never part of a base's home cluster).
+     */
+    crystalMinBaseDist: 10,
+    /** Minimum Chebyshev distance between a crystal node and any other node (its mirror twin included). */
+    crystalMinSpacing: 3,
     /** Fraction of tiles seeded as wall before smoothing. */
     wallDensity: 0.22,
     smoothingPasses: 2,

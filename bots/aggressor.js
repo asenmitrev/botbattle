@@ -1,5 +1,5 @@
-// Aggressor: lean economy, rush crystal, then fighters in waves. The army first seizes the crystal
-// field in the center (starving the enemy of fighters), then assaults the enemy base in force.
+// Aggressor: lean economy, rush crystal, then fighters in waves. The army first seizes the known
+// crystal field (starving the enemy of fighters), then assaults the enemy base in force.
 // Self-contained (no imports) so it can be pasted into the playground.
 
 const ENERGY_WORKERS = 3;
@@ -26,7 +26,6 @@ export function onTick(state, memory) {
   memory.role = memory.role || {};
   const last = memory.last || {};
   memory.last = {};
-  memory.wp = memory.wp || {};
 
   /** moveTo with a sidestep when the unit didn't move last tick (crowds gridlock otherwise). */
   const go = (u, p) => {
@@ -86,12 +85,13 @@ export function onTick(state, memory) {
   }
 
   // ---------------------------------------------------------------- workers
-  const exploreCenter = [
-    center,
-    { x: center.x + (base.x < center.x ? -5 : 5), y: center.y + (base.y < center.y ? -5 : 5) },
-    { x: center.x - 6, y: center.y + 6 },
-    { x: center.x + 6, y: center.y - 6 },
-  ];
+  // Crystal can be anywhere: search a grid of waypoints over the whole map, nearest unseen first.
+  const searchGrid = [];
+  for (let y = 4; y <= N; y += 8) for (let x = 4; x <= N; x += 8) searchGrid.push({ x, y });
+  const visible = new Set(state.visibleTiles.map((t) => t.x + "," + t.y));
+  memory.searched = (memory.searched || []).concat(searchGrid.filter((p) => visible.has(p.x + "," + p.y)).map((p) => p.x + "," + p.y));
+  memory.searched = [...new Set(memory.searched)];
+  const seeking = new Set();
   const assigned = {};
   const inZone = (p, margin) => {
     const dx = p.x - state.zone.x;
@@ -116,11 +116,13 @@ export function onTick(state, memory) {
     } else if (node) {
       actions.push(cheb(u, node) === 1 ? { type: "harvest", unitId: u.id, nodeId: node.id } : go(u, node));
     } else if (type === "crystal") {
-      // Crystal not found yet: sweep the center.
-      let i = memory.wp[u.id] || 0;
-      if (cheb(u, exploreCenter[i % exploreCenter.length]) <= 2) i++;
-      memory.wp[u.id] = i;
-      actions.push(go(u, exploreCenter[i % exploreCenter.length]));
+      // Crystal not found yet: head for the nearest unseen waypoint no other worker is taking.
+      const open = searchGrid.filter((p) => !memory.searched.includes(p.x + "," + p.y));
+      const free = open.filter((p) => !seeking.has(p.x + "," + p.y));
+      const pool = free.length ? free : open.length ? open : searchGrid;
+      const wp = pool.sort((a, b) => manh(a, u) - manh(b, u) || a.y - b.y || a.x - b.x)[0];
+      seeking.add(wp.x + "," + wp.y);
+      actions.push(go(u, wp));
     }
   }
 
@@ -162,7 +164,7 @@ export function onTick(state, memory) {
       actions.push({ type: "attack", unitId: u.id, targetId: adj[0].id });
       continue;
     }
-    // 2. Close in on nearby enemy units (wider net while holding the center, tight while assaulting).
+    // 2. Close in on nearby enemy units (wider net while holding the crystal field, tight while assaulting).
     const reach = memory.wave.includes(u.id) && !memory.assault ? 6 : 3;
     const prey = enemyUnits.filter((e) => cheb(e, u) <= reach && (reach === 3 || cheb(e, hold) <= 9)).sort((a, b) => cheb(a, u) - cheb(b, u) || a.hp - b.hp || a.id - b.id)[0];
     if (prey) {
