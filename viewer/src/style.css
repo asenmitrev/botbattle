@@ -41,9 +41,19 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text-p
 select, input[type="number"] { font: inherit; color: var(--text-primary); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
 input[type="number"] { width: 72px; }
 
-.split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+/* Two panes and a draggable divider. --split-l / --split-r are set from main.ts (fr units); the minimums
+   keep either side from collapsing even if the window shrinks after the split was chosen. */
+.split { --split-min-l: 520px; --split-min-r: 320px; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(min(var(--split-min-l), 45%), var(--split-l, 1fr)) 7px minmax(min(var(--split-min-r), 45%), var(--split-r, 1fr)); }
 .pane { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
-.pane.left { border-right: 1px solid var(--border); overflow: auto; padding: 8px 12px; gap: 8px; }
+.pane.left { overflow: auto; padding: 8px 12px; gap: 8px; }
+.splitter { position: relative; z-index: 3; cursor: col-resize; touch-action: none; background: var(--surface-1); border-left: 1px solid var(--border); border-right: 1px solid var(--border); outline: none; }
+.splitter::before { content: ""; position: absolute; inset: 0 -5px; } /* wider hit area than the visible bar */
+.splitter::after { content: ""; position: absolute; top: 50%; left: 50%; width: 3px; height: 36px; transform: translate(-50%, -50%); border-radius: 2px; background: var(--text-muted); opacity: .55; transition: opacity .12s, background-color .12s; }
+.splitter:hover::after, .splitter.dragging::after { opacity: 1; background: var(--text-secondary); }
+.splitter:focus-visible { background: color-mix(in srgb, var(--accent) 35%, var(--surface-1)); }
+.splitter:focus-visible::after { opacity: 1; background: var(--accent); }
+body.split-dragging { cursor: col-resize; user-select: none; -webkit-user-select: none; }
+body.split-dragging .pane { pointer-events: none; }
 .pane.right { background: var(--surface-1); }
 
 .playback { display: flex; align-items: center; gap: 6px; }
@@ -119,7 +129,8 @@ dialog.readme::backdrop { background: rgba(0,0,0,.6); }
 @media (max-width: 1000px) {
   #app { height: auto; min-height: 100vh; }
   .split { grid-template-columns: minmax(0, 1fr); }
-  .pane.left { border-right: 0; overflow: visible; padding: 8px 16px; }
+  .splitter { display: none; }
+  .pane.left { overflow: visible; padding: 8px 16px; }
   .pane.right { min-height: 70vh; }
   .board-row { flex-direction: column; align-items: stretch; }
   .board-wrap { max-height: none; }

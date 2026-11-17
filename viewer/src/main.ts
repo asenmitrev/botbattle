@@ -588,6 +588,106 @@ $("howto-copy").addEventListener("click", async () => {
 if (!load(HOWTO_KEY)) howto.showModal();
 
 // ------------------------------------------------------------------ layout
+// Draggable divider between the board (left) and the editor (right). The split is a fraction of the
+// row given to the left pane; CSS turns it into fr tracks with per-side minimum widths. Changing it
+// resizes the board canvas, which the ResizeObserver below picks up (once per frame) to re-render.
+const SPLIT_KEY = "bot-arena:split";
+const SPLIT_DEFAULT = 0.5;
+const SPLIT_MIN_L = 520; // px (board + 220px stats column), keep in sync with --split-min-l in style.css
+const SPLIT_MIN_R = 320; // px, keep in sync with --split-min-r
+const splitEl = document.querySelector<HTMLElement>(".split")!;
+const splitter = $("splitter");
+let split = (() => {
+  const v = Number(load(SPLIT_KEY));
+  return Number.isFinite(v) && v > 0 && v < 1 ? v : SPLIT_DEFAULT;
+})();
+
+/** Allowed range of the split fraction for the current row width. */
+function splitBounds(): [number, number] {
+  const w = splitEl.clientWidth - splitter.offsetWidth;
+  if (w <= SPLIT_MIN_L + SPLIT_MIN_R) return [0.45, 0.55];
+  return [SPLIT_MIN_L / w, 1 - SPLIT_MIN_R / w];
+}
+function setSplitVars(f: number): void {
+  splitEl.style.setProperty("--split-l", `${f}fr`);
+  splitEl.style.setProperty("--split-r", `${1 - f}fr`);
+}
+/** Mirror the effective (clamped) split into the ARIA attributes. */
+function splitAria(): void {
+  const [lo, hi] = splitBounds();
+  const pct = Math.round(Math.min(hi, Math.max(lo, split)) * 100);
+  splitter.setAttribute("aria-valuenow", String(pct));
+  splitter.setAttribute("aria-valuemin", String(Math.round(lo * 100)));
+  splitter.setAttribute("aria-valuemax", String(Math.round(hi * 100)));
+  splitter.setAttribute("aria-valuetext", `Map ${pct}%, code ${100 - pct}%`);
+}
+function applySplit(f: number, persist = false): void {
+  const [lo, hi] = splitBounds();
+  split = Math.min(hi, Math.max(lo, f));
+  setSplitVars(split);
+  splitAria();
+  if (persist) save(SPLIT_KEY, String(split));
+}
+// Stacked (narrow) layout hides the divider: offsetWidth is 0 there, so it can't be dragged or focused.
+const splitActive = () => splitter.offsetWidth > 0;
+setSplitVars(split); // the CSS minimums clamp it if the window is narrower than when it was saved
+if (splitActive()) splitAria();
+
+let drag: { id: number; left: number; width: number; raf: number; x: number } | null = null;
+splitter.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || !splitActive()) return;
+  e.preventDefault();
+  const r = splitEl.getBoundingClientRect(); // read once; pointermoves only write
+  drag = { id: e.pointerId, left: r.left, width: r.width - splitter.offsetWidth, raf: 0, x: e.clientX };
+  splitter.setPointerCapture(e.pointerId);
+  splitter.classList.add("dragging");
+  document.body.classList.add("split-dragging");
+});
+splitter.addEventListener("pointermove", (e) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  drag.x = e.clientX;
+  // Coalesce to one style write per frame; the ResizeObserver then redraws the board in the same frame.
+  if (!drag.raf)
+    drag.raf = requestAnimationFrame(() => {
+      if (!drag) return;
+      drag.raf = 0;
+      applySplit((drag.x - drag.left - splitter.offsetWidth / 2) / drag.width);
+    });
+});
+function endDrag(e: PointerEvent): void {
+  if (!drag || e.pointerId !== drag.id) return;
+  cancelAnimationFrame(drag.raf);
+  applySplit((drag.x - drag.left - splitter.offsetWidth / 2) / drag.width, true);
+  drag = null;
+  if (splitter.hasPointerCapture(e.pointerId)) splitter.releasePointerCapture(e.pointerId);
+  splitter.classList.remove("dragging");
+  document.body.classList.remove("split-dragging");
+}
+splitter.addEventListener("pointerup", endDrag);
+splitter.addEventListener("pointercancel", endDrag);
+splitter.addEventListener("lostpointercapture", endDrag);
+splitter.addEventListener("dblclick", () => applySplit(SPLIT_DEFAULT, true));
+splitter.addEventListener("keydown", (e) => {
+  if (!splitActive()) return;
+  const step = e.shiftKey ? 0.1 : 0.02;
+  const [lo, hi] = splitBounds();
+  const cur = Math.min(hi, Math.max(lo, split)); // step from what's on screen, not a saved out-of-range value
+  let next: number | null = null;
+  if (e.key === "ArrowLeft") next = cur - step;
+  else if (e.key === "ArrowRight") next = cur + step;
+  else if (e.key === "Home") next = lo;
+  else if (e.key === "End") next = hi;
+  else if (e.key === "Enter") next = SPLIT_DEFAULT;
+  if (next === null) return;
+  e.preventDefault();
+  e.stopPropagation(); // the document-level arrow keys step the replay; don't do both
+  applySplit(next, true);
+});
+// The saved split survives window resizes (CSS clamps it); just keep the ARIA values honest.
+window.addEventListener("resize", () => {
+  if (splitActive()) splitAria();
+});
+
 const ro = new ResizeObserver(() => {
   board.resize();
   for (const c of Object.values(charts)) c.draw();
