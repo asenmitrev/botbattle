@@ -85,8 +85,6 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     for (const name of opts.houseBots ?? HOUSE_BOTS) ladder.registerHouseBot(name, path.join(REPO, "bots", `${name}.js`));
   };
   registerHouseBots();
-  const opened = ladder.openLegacyWallets();
-  if (opened) log(`botcoin: opened ${opened} wallet(s) for existing owners`);
   const makeScheduler = () =>
     new Scheduler(ladder, {
       ...opts.scheduler,
@@ -98,6 +96,8 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
   /** The playoff being played right now, or one that just failed. Otherwise GET /api/playoff reads the last archived one. */
   let playoff: Playoff | null = null;
   let seasonEnd: Promise<void> | null = null;
+  /** The season ended with `hold`: the new ladder waits for a restart with new code and accepts no changes. */
+  let held = false;
   const dist = opts.serveViewer === false ? null : ensureViewerBuilt(log);
   const realDist = dist ? fs.realpathSync(dist) : "";
   const limit = opts.rateLimit ?? { max: 10, windowMs: 10 * 60 * 1000 };
@@ -141,13 +141,19 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
           busy: scheduler.busy,
           boostQueue: scheduler.queue.filter((j) => j.boostFor).length,
           playoff: !!seasonEnd,
+          held,
         });
       }
       if (req.method === "GET" && p === "/api/playoff") return json(res, 200, playoff ?? seasons?.latestPlayoff() ?? null);
       if (req.method === "POST" && p === "/api/admin/end-season") return endSeasonRoute(req, res);
-      // While a season is ending, nothing may change the ladder that is about to be archived.
-      if (seasonEnd && req.method !== "GET" && req.method !== "HEAD" && !["/api/wallet", "/api/mine"].includes(p)) {
-        return json(res, 503, { error: "the season is ending: the playoff is being played. Try again once the new season starts." });
+      // While a season is ending, nothing may change the ladder that is about to be archived; while a held
+      // season waits for the deploy's restart, nothing may change the new one either.
+      if ((seasonEnd || held) && req.method !== "GET" && req.method !== "HEAD" && !["/api/wallet", "/api/mine"].includes(p)) {
+        return json(res, 503, {
+          error: held
+            ? "a new season is about to start: the server is restarting with new code. Try again in a minute."
+            : "the season is ending: the playoff is being played. Try again once the new season starts.",
+        });
       }
       if (req.method === "GET" && p === "/api/leaderboard") {
         const boosts = scheduler.boostCounts();
@@ -210,21 +216,27 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
    * with GET /api/playoff.
    */
   async function endSeasonRoute(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const body = await readJson(req, 4 * 1024, "body must be JSON {password, minElo?}");
+    const body = await readJson(req, 4 * 1024, "body must be JSON {password, minElo?, hold?}");
     if (!adminOk(str(body.password))) {
       await new Promise((r) => setTimeout(r, 1000)); // slow down guessing
       return json(res, 403, { error: "wrong password" });
     }
     if (!seasons) return json(res, 400, { error: "seasons need a data dir" });
-    if (seasonEnd) return json(res, 409, { error: "the season is already ending" });
+    if (seasonEnd || held) return json(res, 409, { error: held ? "the new season is held for a restart" : "the season is already ending" });
     const minElo = body.minElo === undefined || body.minElo === null || body.minElo === "" ? undefined : Number(body.minElo);
     if (minElo !== undefined && !Number.isFinite(minElo)) return json(res, 400, { error: "minElo must be a number" });
-    seasonEnd = endSeason(minElo).finally(() => (seasonEnd = null));
-    return json(res, 202, { started: true, playoff });
+    const hold = body.hold === true;
+    seasonEnd = endSeason(minElo, hold).finally(() => (seasonEnd = null));
+    return json(res, 202, { started: true, hold, playoff });
   }
 
-  /** Stop the ladder, play the playoff, archive the season and swap in the fresh ladder. Never throws. */
-  async function endSeason(minElo: number | undefined): Promise<void> {
+  /**
+   * Stop the ladder, play the playoff, archive the season and swap in the fresh ladder. Never throws.
+   * With `hold`, a successful season end leaves the new ladder stopped: a deploy restarts the server with new
+   * code next, so no game of the new season is played under the old rules. A failure always resumes the ladder.
+   */
+  async function endSeason(minElo: number | undefined, hold: boolean): Promise<void> {
+    let resume = true;
     log("ending the season: stopping the ladder");
     // Show the bracket right away; it is seeded again from the final standings once the games in flight finish.
     playoff = createPlayoff(ladder);
@@ -248,6 +260,11 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
       registerHouseBots();
       scheduler = makeScheduler();
       playoff = null; // the archive serves it from now on
+      if (hold) {
+        resume = false;
+        held = true;
+        log("new season held: the ladder starts when the server restarts");
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       log(`ending the season failed: ${msg}`);
@@ -258,7 +275,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
       }
       fs.rmSync(path.join(dataDir, PLAYOFF_FILE), { force: true });
     } finally {
-      scheduler.start();
+      if (resume) scheduler.start();
     }
   }
 

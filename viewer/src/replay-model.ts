@@ -28,6 +28,9 @@ export class ReplayModel {
   readonly verified: boolean;
 
   constructor(readonly replay: Replay) {
+    if (replay.configVersion !== CONFIG_VERSION) {
+      throw new Error(`Replay was recorded under rules ${replay.configVersion}; this viewer plays ${CONFIG_VERSION}, so it can't be shown.`);
+    }
     let s = createInitialState(replay.seed);
     this.states.push(s);
     for (const rec of replay.ticks) {
@@ -40,11 +43,6 @@ export class ReplayModel {
       this.states[this.states.length - 1] = s;
     }
     this.verified = hashState(s) === replay.finalStateHash;
-    // A replay from an older config is still exact if the current rules reproduce its final state
-    // (most rule changes never come into play in a given match); otherwise it would show a different game.
-    if (replay.configVersion !== CONFIG_VERSION && !this.verified) {
-      throw new Error(`Replay was recorded with config ${replay.configVersion} and plays out differently under the current rules (${CONFIG_VERSION}), so it can't be shown.`);
-    }
     const mk = (): [number[], number[]] => [[], []];
     this.series = { score: mk(), units: mk(), energy: mk() };
     for (const st of this.states) {

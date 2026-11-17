@@ -1,6 +1,7 @@
 import { CONFIG, UPGRADE_TYPES, type NodeType, type StructureType, type UnitType, type UpgradeType } from "./config.js";
 import { dist2 } from "./geometry.js";
-import { cargoCapacity, maxHp, zoneCenter, zoneRadius } from "./state.js";
+import { zoneCenter, zoneRadius } from "./state.js";
+import { cargoCapacity, maxHp } from "./stats.js";
 import { TILE, type GameState, type PlayerId, type Pos, type TileType } from "./types.js";
 
 /** Visibility grid for a player: 1 = visible. Vision is a Euclidean circle; no line of sight. */
@@ -77,11 +78,6 @@ export interface BotState {
   crystal: number;
   /** Which per-type upgrades you have bought (each covers all your entities of that type, current and future). */
   myUpgrades: Record<UpgradeType, boolean>;
-  /**
-   * @deprecated Always all false: the config 1.x upgrades (cargo/armor/weapons/scoutSpeed) are gone; see
-   * `myUpgrades`. Kept so bots written for the old API don't crash.
-   */
-  upgrades: { cargo: false; armor: false; weapons: false; scoutSpeed: false };
   visibleEnemies: BotEnemy[];
   visibleNodes: BotNode[];
   visibleTiles: BotTile[];
@@ -113,10 +109,10 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
     if (b.owner !== player && b.hp > 0 && seen(b)) visibleEnemies.push({ id: b.id, kind: "base", type: "base", x: b.x, y: b.y, hp: b.hp });
   }
   for (const u of state.units) {
-    if (u.owner !== player && seen(u)) visibleEnemies.push({ id: u.id, kind: "unit", type: u.type, x: u.x, y: u.y, hp: u.hp, upgraded: !!u.upgraded });
+    if (u.owner !== player && seen(u)) visibleEnemies.push({ id: u.id, kind: "unit", type: u.type, x: u.x, y: u.y, hp: u.hp, upgraded: u.upgraded });
   }
   for (const s of state.structures) {
-    if (s.owner !== player && seen(s)) visibleEnemies.push({ id: s.id, kind: "structure", type: s.type, x: s.x, y: s.y, hp: s.hp, upgraded: !!s.upgraded });
+    if (s.owner !== player && seen(s)) visibleEnemies.push({ id: s.id, kind: "structure", type: s.type, x: s.x, y: s.y, hp: s.hp, upgraded: s.upgraded });
   }
   visibleEnemies.sort((a, b) => a.id - b.id);
 
@@ -145,15 +141,14 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
         maxHp: maxHp(u),
         cargo: { ...u.cargo },
         cargoCapacity: cargoCapacity(u.type),
-        upgraded: !!u.upgraded,
+        upgraded: u.upgraded,
       })),
     myStructures: state.structures
       .filter((s) => s.owner === player)
-      .map((s) => ({ id: s.id, type: s.type, x: s.x, y: s.y, hp: s.hp, maxHp: maxHp(s), upgraded: !!s.upgraded })),
+      .map((s) => ({ id: s.id, type: s.type, x: s.x, y: s.y, hp: s.hp, maxHp: maxHp(s), upgraded: s.upgraded })),
     energy: me.energy,
     crystal: me.crystal,
-    myUpgrades: Object.fromEntries(UPGRADE_TYPES.map((t) => [t, !!me.upgrades?.includes(t)])) as Record<UpgradeType, boolean>,
-    upgrades: { cargo: false, armor: false, weapons: false, scoutSpeed: false },
+    myUpgrades: Object.fromEntries(UPGRADE_TYPES.map((t) => [t, me.upgrades.includes(t)])) as Record<UpgradeType, boolean>,
     visibleEnemies,
     visibleNodes: state.nodes.filter(seen).map((n) => ({ id: n.id, type: n.type, x: n.x, y: n.y, amount: n.amount })),
     visibleTiles,

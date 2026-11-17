@@ -1,19 +1,8 @@
-import { BUILD_TYPES, CONFIG, UNIT_TYPES, UPGRADE_TYPES, type BuildType, type UnitType, type UpgradeType } from "./config.js";
+import { BUILD_TYPES, CONFIG, type BuildType, type UpgradeType } from "./config.js";
 import { chebyshev, DIRS, DIR_ORDER_P1, DIR_ORDER_P2, dist2, distanceField, inBounds } from "./geometry.js";
-import {
-  cargoCapacity,
-  cloneState,
-  computeScore,
-  findSpawnTile,
-  hasUpgrade,
-  makeUnit,
-  maxHp,
-  occupancy,
-  unitSpeed,
-  zoneCenter,
-  zoneRadius,
-} from "./state.js";
-import { TILE, type Action, type Dir, type GameEvent, type GameState, type MatchResult, type PlayerId, type StepResult, type Unit } from "./types.js";
+import { cloneState, computeScore, findSpawnTile, hasUpgrade, makeUnit, occupancy, zoneCenter, zoneRadius } from "./state.js";
+import { buildSpec, cargoCapacity, hasUpgradeType, isUnitType, maxHp, turretImmune, unitSpeed } from "./stats.js";
+import { TILE, type Action, type Dir, type GameEvent, type GameState, type MatchResult, type PlayerId, type Pos, type StepResult, type Unit } from "./types.js";
 import { computeVisibility } from "./vision.js";
 
 type UnitAction = Extract<Action, { unitId: number }>;
@@ -127,152 +116,134 @@ export function forfeit(prev: GameState, loser: PlayerId): StepResult {
 
 // ============================================================ phase 1
 
+/** A bot action as received: an object with a string `type`, every other field unchecked. */
+type RawAction = Record<string, unknown> & { type: string };
+
 function isInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v);
 }
 
+function isRawAction(v: unknown): v is RawAction {
+  return !!v && typeof v === "object" && typeof (v as { type?: unknown }).type === "string";
+}
+
+/** `a.x`, `a.y` are integers on the map. */
+function onMap(a: RawAction, size: number): a is RawAction & Pos {
+  return isInt(a.x) && isInt(a.y) && inBounds(size, a.x, a.y);
+}
+
+const isDir = (v: unknown): v is Dir => typeof v === "string" && Object.hasOwn(DIRS, v);
+
+/**
+ * Unit actions: each entry checks one raw action for the unit it names and returns the normalized action
+ * (only known fields, so stored intents never alias bot objects) or the reason it is invalid. Ownership and
+ * one-action-per-unit are checked by the caller.
+ */
+const UNIT_ACTIONS: { [K in UnitAction["type"]]: (a: RawAction, u: Unit, size: number) => Extract<UnitAction, { type: K }> | string } = {
+  move: (a, u) => (isDir(a.dir) ? { type: "move", unitId: u.id, dir: a.dir } : "bad dir"),
+  moveTo: (a, u, size) => (onMap(a, size) ? { type: "moveTo", unitId: u.id, x: a.x, y: a.y } : "target out of bounds"),
+  harvest: (a, u) => {
+    if (CONFIG.units[u.type].harvest <= 0) return `${u.type} cannot harvest`;
+    return isInt(a.nodeId) ? { type: "harvest", unitId: u.id, nodeId: a.nodeId } : "missing nodeId";
+  },
+  deposit: (_a, u) => (CONFIG.units[u.type].carry > 0 ? { type: "deposit", unitId: u.id } : `${u.type} cannot carry`),
+  attack: (a, u) => {
+    if (CONFIG.units[u.type].damage <= 0) return `${u.type} cannot attack`;
+    return isInt(a.targetId) ? { type: "attack", unitId: u.id, targetId: a.targetId } : "missing targetId";
+  },
+  build: (a, u, size) => {
+    if (!CONFIG.units[u.type].canBuild) return `${u.type} cannot build`;
+    const structure = a.structure;
+    if (typeof structure !== "string" || !BUILD_TYPES.includes(structure as BuildType)) return "unknown structure";
+    return onMap(a, size) ? { type: "build", unitId: u.id, structure: structure as BuildType, x: a.x, y: a.y } : "build position out of bounds";
+  },
+};
+
+interface CollectContext {
+  state: GameState;
+  player: PlayerId;
+  intents: Intents;
+  events: GameEvent[];
+  /** Per-tick counters for the capped actions. */
+  logs: number;
+  marks: number;
+  invalid(action: unknown, reason: string): void;
+}
+
+/** Actions that don't belong to a unit. Each records its own intent or event. */
+const PLAYER_ACTIONS: Record<string, (a: RawAction, c: CollectContext) => void> = {
+  log(a, c) {
+    if (++c.logs > CONFIG.bot.maxLogsPerTick) return;
+    c.events.push({ type: "log", player: c.player, text: String(a.text).slice(0, CONFIG.bot.maxLogLength) });
+  },
+  mark(a, c) {
+    if (!onMap(a, c.state.map.size)) return c.invalid(a, "mark position out of bounds");
+    if (++c.marks > CONFIG.bot.maxMarksPerTick) return;
+    const color = typeof a.color === "string" ? a.color.slice(0, 32) : "";
+    const label = typeof a.label === "string" ? a.label.slice(0, 64) : "";
+    c.events.push({ type: "mark", player: c.player, x: a.x, y: a.y, color, label });
+  },
+  spawn(a, c) {
+    if (typeof a.unit !== "string" || !isUnitType(a.unit)) return c.invalid(a, "unknown unit type");
+    const baseId = a.baseId;
+    if (baseId !== undefined && !(isInt(baseId) && c.state.bases.some((b) => b.id === baseId && b.owner === c.player && b.hp > 0))) {
+      return c.invalid(a, "no such living base (or not yours)");
+    }
+    if (c.intents.spawn !== null) return c.invalid(a, "only one spawn per tick");
+    c.intents.spawn = { type: "spawn", unit: a.unit, ...(baseId !== undefined ? { baseId } : {}) };
+  },
+  upgrade(a, c) {
+    if (typeof a.upgrade !== "string" || !hasUpgradeType(a.upgrade)) return c.invalid(a, "unknown upgrade");
+    if (c.intents.upgrades.includes(a.upgrade)) return c.invalid(a, "duplicate upgrade");
+    c.intents.upgrades.push(a.upgrade);
+  },
+};
+
 function collectIntents(state: GameState, player: PlayerId, raw: unknown, events: GameEvent[]): Intents {
   const intents: Intents = { unit: new Map(), spawn: null, upgrades: [] };
-  const invalid = (action: unknown, reason: string) => events.push({ type: "invalid_action", player, action, reason });
+  const c: CollectContext = {
+    state,
+    player,
+    intents,
+    events,
+    logs: 0,
+    marks: 0,
+    invalid: (action, reason) => events.push({ type: "invalid_action", player, action: sanitize(action), reason }),
+  };
   if (raw === undefined || raw === null) return intents;
   if (!Array.isArray(raw)) {
-    invalid(null, "bot returned a non-array");
+    c.invalid(null, "bot returned a non-array");
     return intents;
   }
-  const bc = CONFIG.bot;
-  let list = raw as unknown[];
-  if (list.length > bc.maxActionsPerTick) {
-    invalid(null, `too many actions (${list.length}), only the first ${bc.maxActionsPerTick} are used`);
-    list = list.slice(0, bc.maxActionsPerTick);
-  }
-  const size = state.map.size;
+  const max = CONFIG.bot.maxActionsPerTick;
+  if (raw.length > max) c.invalid(null, `too many actions (${raw.length}), only the first ${max} are used`);
   const units = new Map<number, Unit>();
   for (const u of state.units) if (u.owner === player) units.set(u.id, u);
-  let logs = 0;
-  let marks = 0;
 
-  for (const a of list) {
-    if (!a || typeof a !== "object" || typeof (a as { type?: unknown }).type !== "string") {
-      invalid(sanitize(a), "malformed action");
+  for (const a of raw.slice(0, max) as unknown[]) {
+    if (!isRawAction(a)) {
+      c.invalid(a, "malformed action");
       continue;
     }
-    const act = a as Record<string, unknown>;
-    switch (act.type) {
-      case "log": {
-        if (++logs > bc.maxLogsPerTick) break;
-        events.push({ type: "log", player, text: String(act.text).slice(0, bc.maxLogLength) });
-        break;
-      }
-      case "mark": {
-        if (!isInt(act.x) || !isInt(act.y) || !inBounds(size, act.x, act.y)) {
-          invalid(sanitize(act), "mark position out of bounds");
-          break;
-        }
-        if (++marks > bc.maxMarksPerTick) break;
-        events.push({
-          type: "mark",
-          player,
-          x: act.x,
-          y: act.y,
-          color: typeof act.color === "string" ? act.color.slice(0, 32) : "",
-          label: typeof act.label === "string" ? act.label.slice(0, 64) : "",
-        });
-        break;
-      }
-      case "spawn": {
-        if (!UNIT_TYPES.includes(act.unit as UnitType)) invalid(sanitize(act), "unknown unit type");
-        else if (act.baseId !== undefined && (!isInt(act.baseId) || !state.bases.some((b) => b.id === act.baseId && b.owner === player && b.hp > 0))) {
-          invalid(sanitize(act), "no such living base (or not yours)");
-        } else if (intents.spawn !== null) invalid(sanitize(act), "only one spawn per tick");
-        else intents.spawn = { type: "spawn", unit: act.unit as UnitType, ...(act.baseId !== undefined ? { baseId: act.baseId as number } : {}) };
-        break;
-      }
-      case "upgrade": {
-        // `{ upgrade: type }`; the config 2.0.x form `{ targetId }` still works and buys that entity's type.
-        let up: UpgradeType | null = null;
-        if (act.upgrade !== undefined) {
-          if (UPGRADE_TYPES.includes(act.upgrade as UpgradeType)) up = act.upgrade as UpgradeType;
-          else invalid(sanitize(act), "unknown upgrade");
-        } else if (isInt(act.targetId)) {
-          const target = state.units.find((u) => u.id === act.targetId) ?? state.structures.find((x) => x.id === act.targetId);
-          if (!target || target.owner !== player) invalid(sanitize(act), "no such unit or structure (or not yours)");
-          else if (!UPGRADE_TYPES.includes(target.type as UpgradeType)) invalid(sanitize(act), `${target.type} has no upgrade`);
-          else up = target.type as UpgradeType;
-        } else invalid(sanitize(act), "missing upgrade");
-        if (up === null) break;
-        if (intents.upgrades.includes(up)) invalid(sanitize(act), "duplicate upgrade");
-        else intents.upgrades.push(up);
-        break;
-      }
-      case "move":
-      case "moveTo":
-      case "harvest":
-      case "deposit":
-      case "attack":
-      case "build": {
-        const reason = validateUnitAction(act, units, size);
-        if (reason) {
-          invalid(sanitize(act), reason);
-          break;
-        }
-        const id = act.unitId as number;
-        if (intents.unit.has(id)) {
-          invalid(sanitize(act), "unit already has an action this tick");
-          break;
-        }
-        intents.unit.set(id, normalizeUnitAction(act));
-        break;
-      }
-      default:
-        invalid(sanitize(act), "unknown action type");
+    if (Object.hasOwn(PLAYER_ACTIONS, a.type)) {
+      PLAYER_ACTIONS[a.type]!(a, c);
+      continue;
     }
+    if (!Object.hasOwn(UNIT_ACTIONS, a.type)) {
+      c.invalid(a, "unknown action type");
+      continue;
+    }
+    const u = isInt(a.unitId) ? units.get(a.unitId) : undefined;
+    if (!u) {
+      c.invalid(a, isInt(a.unitId) ? "no such unit (or not yours)" : "missing unitId");
+      continue;
+    }
+    const parsed = UNIT_ACTIONS[a.type as UnitAction["type"]](a, u, state.map.size);
+    if (typeof parsed === "string") c.invalid(a, parsed);
+    else if (intents.unit.has(u.id)) c.invalid(a, "unit already has an action this tick");
+    else intents.unit.set(u.id, parsed);
   }
   return intents;
-}
-
-function validateUnitAction(a: Record<string, unknown>, units: Map<number, Unit>, size: number): string | null {
-  if (!isInt(a.unitId)) return "missing unitId";
-  const u = units.get(a.unitId);
-  if (!u) return "no such unit (or not yours)";
-  const spec = CONFIG.units[u.type];
-  switch (a.type) {
-    case "move":
-      return a.dir === "N" || a.dir === "S" || a.dir === "E" || a.dir === "W" ? null : "bad dir";
-    case "moveTo":
-      return isInt(a.x) && isInt(a.y) && inBounds(size, a.x, a.y) ? null : "target out of bounds";
-    case "harvest":
-      if (spec.harvest <= 0) return `${u.type} cannot harvest`;
-      return isInt(a.nodeId) ? null : "missing nodeId";
-    case "deposit":
-      return spec.carry > 0 ? null : `${u.type} cannot carry`;
-    case "attack":
-      if (spec.damage <= 0) return `${u.type} cannot attack`;
-      return isInt(a.targetId) ? null : "missing targetId";
-    case "build":
-      if (u.type !== "worker") return `${u.type} cannot build`;
-      if (!BUILD_TYPES.includes(a.structure as BuildType)) return "unknown structure";
-      return isInt(a.x) && isInt(a.y) && inBounds(size, a.x, a.y) ? null : "build position out of bounds";
-  }
-  return "unknown action type";
-}
-
-/** Copy only known fields so stored intents never alias bot objects. */
-function normalizeUnitAction(a: Record<string, unknown>): UnitAction {
-  const unitId = a.unitId as number;
-  switch (a.type) {
-    case "move":
-      return { type: "move", unitId, dir: a.dir as Dir };
-    case "moveTo":
-      return { type: "moveTo", unitId, x: a.x as number, y: a.y as number };
-    case "harvest":
-      return { type: "harvest", unitId, nodeId: a.nodeId as number };
-    case "deposit":
-      return { type: "deposit", unitId };
-    case "attack":
-      return { type: "attack", unitId, targetId: a.targetId as number };
-    default:
-      return { type: "build", unitId, structure: a.structure as BuildType, x: a.x as number, y: a.y as number };
-  }
 }
 
 /** JSON-safe, size-bounded copy of an arbitrary bot value for event logs. */
@@ -290,19 +261,16 @@ function sanitize(v: unknown): unknown {
 
 function applyUpgrades(state: GameState, player: PlayerId, intents: Intents, events: GameEvent[]): void {
   const p = state.players[player - 1]!;
-  // Left absent until the first purchase so games without upgrades hash exactly as before.
-  const owned = p.upgrades ?? [];
   for (const up of intents.upgrades) {
     const action = { type: "upgrade", upgrade: up };
     const fail = (reason: string) => events.push({ type: "invalid_action", player, action, reason });
     const cost = CONFIG.upgrades[up];
-    if (owned.includes(up)) fail("already upgraded");
+    if (p.upgrades.includes(up)) fail("already upgraded");
     else if (p.energy < cost.costEnergy || p.crystal < cost.costCrystal) fail("not enough resources");
     else {
       p.energy -= cost.costEnergy;
       p.crystal -= cost.costCrystal;
-      owned.push(up);
-      p.upgrades = owned;
+      p.upgrades.push(up);
       // Applies at once to everything of that type the player has; later spawns/builds start upgraded.
       for (const e of [...state.units, ...state.structures]) {
         if (e.owner !== player || e.type !== up || e.upgraded) continue;
@@ -544,7 +512,7 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
       fail("build tile not empty");
       continue;
     }
-    const sc = act.structure === "base" ? CONFIG.base : CONFIG.structures[act.structure];
+    const sc = buildSpec(act.structure);
     if (Number.isFinite(sc.maxDistFromBase) && !state.bases.some((b) => b.owner === u.owner && b.hp > 0 && chebyshev(act, b) <= sc.maxDistFromBase)) {
       fail(`${act.structure} must be within ${sc.maxDistFromBase} tiles of base`);
       continue;
@@ -566,7 +534,7 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
         events.push({ type: "invalid_action", player: p, action: r.act, reason: "both players built on the same tile" });
         continue;
       }
-      const spec = r.act.structure === "base" ? CONFIG.base : CONFIG.structures[r.act.structure];
+      const spec = buildSpec(r.act.structure);
       if (pl.energy < spec.costEnergy || pl.crystal < spec.costCrystal) {
         events.push({ type: "invalid_action", player: p, action: r.act, reason: "not enough resources" });
         continue;
@@ -627,7 +595,7 @@ function resolveCombat(state: GameState, intents: [Intents, Intents], events: Ga
     let best: Unit | null = null;
     for (const u of state.units) {
       if (u.owner === s.owner || chebyshev(u, s) > sc.range) continue;
-      if (u.type === "fighter" && u.upgraded) continue; // upgraded fighters are immune to turrets
+      if (turretImmune(u)) continue;
       if (!best || u.hp < best.hp || (u.hp === best.hp && u.id < best.id)) best = u;
     }
     if (best) hit(s.id, targets.get(best.id)!, sc.damage);

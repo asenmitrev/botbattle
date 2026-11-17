@@ -472,7 +472,7 @@ export async function initLadder(hooks: Hooks): Promise<void> {
       note.textContent =
         `Final standings of season ${cur.number}, archived ${fmtDate(cur.endedAt)}.` +
         (cur.champion ? ` Champion: ${cur.champion.name}${cur.champion.playoff ? " (playoff winner)" : ` (${cur.champion.elo})`}.` : "") +
-        ` Only the last ${cur.matches} matches${cur.firstMatchAt ? ` (since ${fmtDate(cur.firstMatchAt)})` : ""} are kept; replays recorded under older rules play only if they still play out the same.`;
+        ` Only the last ${cur.matches} matches${cur.firstMatchAt ? ` (since ${fmtDate(cur.firstMatchAt)})` : ""} are kept.`;
     }
   }
 

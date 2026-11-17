@@ -16,8 +16,8 @@ export function testState(opts: { walls?: [number, number][]; tick?: number } = 
       { id: 2, owner: 2, x: 35, y: 35, hp: CONFIG.base.hp },
     ],
     players: [
-      { id: 1, energy: 1000, crystal: 1000 },
-      { id: 2, energy: 1000, crystal: 1000 },
+      { id: 1, energy: 1000, crystal: 1000, upgrades: [] },
+      { id: 2, energy: 1000, crystal: 1000, upgrades: [] },
     ],
     units: [],
     structures: [],
@@ -27,7 +27,7 @@ export function testState(opts: { walls?: [number, number][]; tick?: number } = 
 }
 
 export function addUnit(s: GameState, owner: PlayerId, type: UnitType, x: number, y: number, extra: Partial<Unit> = {}): Unit {
-  const u: Unit = { id: s.nextId++, owner, type, x, y, hp: CONFIG.units[type].hp, cargo: { energy: 0, crystal: 0 }, ...extra };
+  const u: Unit = { id: s.nextId++, owner, type, x, y, hp: CONFIG.units[type].hp, cargo: { energy: 0, crystal: 0 }, upgraded: false, ...extra };
   s.units.push(u);
   s.units.sort((a, b) => a.id - b.id);
   return u;

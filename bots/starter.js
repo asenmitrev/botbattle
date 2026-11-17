@@ -1,4 +1,4 @@
-// Starter bot — identical to the example in BOT_API.md (kept in sync by a test).
+// Starter bot — identical to the example in README.md (kept in sync by a test).
 export function onTick(state, memory) {
   const actions = [];
   const adj = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) === 1;

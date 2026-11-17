@@ -47,11 +47,6 @@ function walletId(owner: string): string {
   return sha256(owner);
 }
 
-/** Older call sites pass a bare token instead of credentials. */
-function toCredentials(cred: string | undefined | Credentials): Credentials {
-  return typeof cred === "object" ? cred : { token: cred };
-}
-
 /** Field checks every submission must pass before anything else is looked at. Throws 400. */
 export function validateSubmission(name: string, code: string, owner: string | undefined): void {
   if (owner !== undefined && !OWNER_RE.test(owner)) throw new SubmitError(400, "owner must be 32-128 hex characters");
@@ -86,14 +81,6 @@ export class Ladder {
     this.economy = new Economy(this.data.economy, () => this.now());
   }
 
-  /** Live ladder startup: owners who submitted before botcoin existed get a wallet (with the grant). */
-  openLegacyWallets(): number {
-    let n = 0;
-    for (const b of this.data.bots) if (!b.house && b.ownerHash && this.economy.ensureWallet(b.ownerHash)) n++;
-    if (n) this.save();
-    return n;
-  }
-
   /**
    * What submitting `name` would cost, and from which wallet. New bots get pricier through the season (see
    * newBotPrice). Each bot gets one free version per UTC day,
@@ -117,9 +104,9 @@ export class Ladder {
     return this.data.bots.filter((b) => !b.house && b.ownerHash && safeEqualHex(wallet, b.ownerHash));
   }
 
-  /** New bots this wallet submitted this season. Wallets from before the counter count the bots they own. */
+  /** New bots this wallet submitted this season. */
   private botsThisSeason(wallet: string): number {
-    return this.economy.wallet(wallet)?.botsThisSeason ?? this.ownedBots(wallet).length;
+    return this.economy.wallet(wallet)?.botsThisSeason ?? 0;
   }
 
   private nextNewBotCost(wallet: string): number {
@@ -290,9 +277,9 @@ export class Ladder {
   submit(
     name: string,
     code: string,
-    cred: string | undefined | Credentials,
+    cred: Credentials,
   ): { bot: BotRecord; token: string | null; created: boolean; cost: number; balance: number | null } {
-    const { token, owner } = toCredentials(cred);
+    const { token, owner } = cred;
     // Botcoin: check the price before changing anything, then open the wallet if needed and pay.
     const { existing, quote } = this.checkSubmit(name, code, { token, owner });
     const pay = (botName: string) => {
@@ -329,8 +316,7 @@ export class Ladder {
    * Delete a user bot (owner token required). Its code file goes; match history and replays stay
    * (match records embed names), so opponents' histories still render.
    */
-  deleteBot(id: string, cred: string | undefined | Credentials): BotRecord {
-    const c = toCredentials(cred);
+  deleteBot(id: string, c: Credentials): BotRecord {
     const b = this.bot(id);
     if (!b) throw new SubmitError(404, "no such bot");
     if (b.house) throw new SubmitError(403, `"${b.name}" is a house bot`);

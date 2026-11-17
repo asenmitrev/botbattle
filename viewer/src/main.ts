@@ -1,7 +1,7 @@
 import "./style.css";
 import { marked } from "marked";
-import { CONFIG, runMatch, type GameEvent, type GameState, type MatchResult, type PlayerId, type Replay } from "@arena/engine";
-import botApiMarkdown from "../../BOT_API.md?raw";
+import { CONFIG, STRUCTURE_TYPES, UNIT_TYPES, UPGRADE_TYPES, runMatch, type GameEvent, type GameState, type MatchResult, type PlayerId, type Replay } from "@arena/engine";
+import readmeSource from "../../README.md?raw";
 import { SAMPLE_BOTS, STARTER_SOURCE } from "./bots.js";
 import { LineChart } from "./charts.js";
 import { createEditor } from "./editor.js";
@@ -43,20 +43,13 @@ const opts: RenderOptions = { fog: 0, marks: true, attacks: true };
 const board = new BoardRenderer($<HTMLCanvasElement>("board"));
 
 // Legend: what each sprite on the board is.
-$("legend").innerHTML = (
-  [
-    ["worker", "Worker"],
-    ["fighter", "Fighter"],
-    ["scout", "Scout"],
-    ["turret", "Turret"],
-    ["wall", "Wall"],
-    ["base", "Base"],
-    ["fighter_up", "Upgraded fighter"],
-    ["scout_up", "Upgraded scout"],
-    ["wall_up", "Upgraded wall"],
-  ] as const
-)
-  .map(([k, label]) => `<div class="legend-item"><img src="${SPRITE_URLS[k]}" alt="" /><span>${label}</span></div>`)
+const title = (t: string) => t[0]!.toUpperCase() + t.slice(1);
+$("legend").innerHTML = [
+  ...[...UNIT_TYPES, ...STRUCTURE_TYPES, "base"].map((t) => [t, title(t)]),
+  ...UPGRADE_TYPES.map((t) => [`${t}_up`, `Upgraded ${t}`]),
+]
+  .filter(([k]) => k! in SPRITE_URLS)
+  .map(([k, label]) => `<div class="legend-item"><img src="${SPRITE_URLS[k as keyof typeof SPRITE_URLS]}" alt="" /><span>${label}</span></div>`)
   .join("");
 const charts: Record<keyof Series, LineChart> = {} as Record<keyof Series, LineChart>;
 for (const el of document.querySelectorAll<HTMLElement>(".chart")) {
@@ -444,9 +437,8 @@ function renderStats(s: GameState): void {
   if (!model) return;
   const names = model.replay.bots;
   const sc = model.series.score;
-  const count = (p: PlayerId, type: string) => s.units.filter((u) => u.owner === p && u.type === type).length;
-  const turrets = (p: PlayerId) => s.structures.filter((x) => x.owner === p && x.type === "turret").length;
-  const ups = (p: PlayerId) => s.players[p - 1]!.upgrades?.join(", ") || "–";
+  const count = (p: PlayerId, type: string) => [...s.units, ...s.structures].filter((e) => e.owner === p && e.type === type).length;
+  const ups = (p: PlayerId) => s.players[p - 1]!.upgrades.join(", ") || "–";
   const row = (label: string, f: (p: PlayerId) => string | number) => `<tr><td>${label}</td><td>${f(1)}</td><td>${f(2)}</td></tr>`;
   $("stats").innerHTML = `
     <table class="stats-table">
@@ -459,10 +451,7 @@ function renderStats(s: GameState): void {
         ${row("Crystal", (p) => s.players[p - 1]!.crystal)}
         ${row("Bases", (p) => s.bases.filter((b) => b.owner === p && b.hp > 0).length)}
         ${row("Base HP", (p) => s.bases.reduce((hp, b) => hp + (b.owner === p ? Math.max(0, b.hp) : 0), 0))}
-        ${row("Workers", (p) => count(p, "worker"))}
-        ${row("Fighters", (p) => count(p, "fighter"))}
-        ${row("Scouts", (p) => count(p, "scout"))}
-        ${row("Turrets", (p) => turrets(p))}
+        ${[...UNIT_TYPES, ...STRUCTURE_TYPES].map((t) => row(`${title(t)}s`, (p) => count(p, t))).join("")}
         ${row("Upgrades", ups)}
       </tbody>
     </table>`;
@@ -552,6 +541,8 @@ $("board").addEventListener("mousemove", (e) => {
 $("board").addEventListener("mouseleave", () => ($("hover-info").textContent = ""));
 
 // ------------------------------------------------------------------ README dialog
+// README.md ties its numbers to the code with HTML-comment markers (scripts/readme.ts); readers don't need them.
+const botApiMarkdown = readmeSource.replace(/<!--\/?(?:v [^>]*|v|table \w+|table)-->/g, "");
 const dialog = $<HTMLDialogElement>("readme-dialog");
 $("readme-body").innerHTML = marked.parse(botApiMarkdown, { async: false }) as string;
 $("readme-btn").addEventListener("click", () => dialog.showModal());

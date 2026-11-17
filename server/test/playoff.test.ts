@@ -100,4 +100,19 @@ describe("ending a season from the server", () => {
     await srv.scheduler.whenIdle();
     expect((await api("GET", "/api/leaderboard")).body.some((x: any) => x.games > 0)).toBe(true);
   });
+
+  it("with hold, a deploy's season end leaves the new season paused and closed to changes until a restart", { timeout: 120_000 }, async () => {
+    const r = await api("POST", "/api/admin/end-season", { password: "secret", hold: true });
+    expect(r.status).toBe(202);
+    expect(r.body.hold).toBe(true);
+    await srv.seasonEnd;
+    const p = (await api("GET", "/api/playoff")).body;
+    expect(p.status).toBe("done");
+    expect(p.champion).toBeTruthy();
+    expect((await api("GET", "/api/seasons")).body.at(-1).id).toBe(p.seasonId);
+    expect((await api("GET", "/api/health")).body).toMatchObject({ playoff: false, held: true });
+    expect(srv.scheduler.started).toBe(false);
+    expect((await api("POST", "/api/bots", { name: "late", code: "x", owner: "c".repeat(64) })).status).toBe(503);
+    expect((await api("POST", "/api/admin/end-season", { password: "secret" })).status).toBe(409);
+  });
 });

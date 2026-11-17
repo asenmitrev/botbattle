@@ -285,7 +285,7 @@ describe("additional bases", () => {
   it("surviving turrets keep firing after their supporting base is destroyed", () => {
     const s = testState();
     const base = addBase(s, 1, 20, 20, 6);
-    s.structures.push({ id: s.nextId++, owner: 1, type: "turret", x: 19, y: 20, hp: 50 });
+    s.structures.push({ upgraded: false, id: s.nextId++, owner: 1, type: "turret", x: 19, y: 20, hp: 50 });
     const enemy = addUnit(s, 2, "fighter", 21, 20);
     const dead = step(s, [], [{ type: "attack", unitId: enemy.id, targetId: base.id }]).state;
     const next = step(dead, [], []).state;

@@ -51,8 +51,8 @@ export interface Wallet {
   balance: number;
   createdAt: string;
   lastStipendDay: string | null;
-  /** New bots this wallet has submitted this season (deleting one doesn't lower it). Absent on old wallets. */
-  botsThisSeason?: number;
+  /** New bots this wallet has submitted this season (deleting one doesn't lower it). */
+  botsThisSeason: number;
   /** Newest last. */
   ledger: LedgerEntry[];
 }

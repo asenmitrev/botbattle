@@ -1,6 +1,7 @@
-import { CONFIG, type StructureType, type UnitType, type UpgradeType } from "./config.js";
+import { CONFIG, type StructureType, type UnitType } from "./config.js";
 import { ADJ8, inBounds } from "./geometry.js";
 import { generateMap } from "./map.js";
+import { hasUpgradeType, maxHp, unitValue } from "./stats.js";
 import { TILE, type Base, type GameState, type PlayerId, type PlayerState, type Pos, type Unit } from "./types.js";
 
 export function createInitialState(seed: number): GameState {
@@ -22,6 +23,7 @@ export function createInitialState(seed: number): GameState {
     id,
     energy: CONFIG.match.startEnergy,
     crystal: CONFIG.match.startCrystal,
+    upgrades: [],
   });
 
   const state: GameState = {
@@ -54,7 +56,7 @@ export function makeUnit(state: GameState, owner: PlayerId, type: UnitType, pos:
 
 /** Whether `owner` has bought the upgrade for `type` (which then applies to all their entities of that type). */
 export function hasUpgrade(state: GameState, owner: PlayerId, type: UnitType | StructureType): boolean {
-  return !!state.players[owner - 1]?.upgrades?.includes(type as UpgradeType);
+  return hasUpgradeType(type) && state.players[owner - 1]!.upgrades.includes(type);
 }
 
 /** Occupancy grid: 1 for every tile blocked by terrain, nodes, bases, structures or units. */
@@ -87,9 +89,7 @@ export function findSpawnTile(state: GameState, owner: PlayerId, occ = occupancy
   return null;
 }
 
-// `upgrades` stays absent until something is bought, so state hashes of games without upgrades
-// (and their replays) are unchanged from config 2.0.0.
-const clonePlayer = (p: PlayerState): PlayerState => (p.upgrades ? { ...p, upgrades: [...p.upgrades] } : { ...p });
+const clonePlayer = (p: PlayerState): PlayerState => ({ ...p, upgrades: [...p.upgrades] });
 
 export function cloneState(s: GameState): GameState {
   return {
@@ -105,34 +105,8 @@ export function cloneState(s: GameState): GameState {
     units: s.units.map((u) => ({ ...u, cargo: { ...u.cargo } })),
     structures: s.structures.map((x) => ({ ...x })),
     nextId: s.nextId,
-    result: s.result
-      ? { ...s.result, scores: [...s.result.scores] as [number, number], ...(s.result.units ? { units: [...s.result.units] as [number, number] } : {}) }
-      : null,
+    result: s.result ? { ...s.result, scores: [...s.result.scores], units: [...s.result.units] } : null,
   };
-}
-
-export function cargoCapacity(type: UnitType): number {
-  return CONFIG.units[type].carry;
-}
-
-export function unitSpeed(u: { type: UnitType; upgraded?: boolean }): number {
-  const speed = CONFIG.units[u.type].speed;
-  return u.type === "scout" && u.upgraded ? speed * CONFIG.upgrades.scout.speedMultiplier : speed;
-}
-
-/** Max HP of a unit or structure, including its upgrade. */
-export function maxHp(e: { type: UnitType | StructureType; upgraded?: boolean }): number {
-  if (e.type === "scout" || e.type === "fighter" || e.type === "worker") {
-    const hp = CONFIG.units[e.type].hp;
-    return e.type === "scout" && e.upgraded ? hp * CONFIG.upgrades.scout.hpMultiplier : hp;
-  }
-  const hp = CONFIG.structures[e.type].hp;
-  return e.type === "wall" && e.upgraded ? hp * CONFIG.upgrades.wall.hpMultiplier : hp;
-}
-
-export function unitValue(type: UnitType): number {
-  const u = CONFIG.units[type];
-  return u.costEnergy * CONFIG.score.energyWeight + u.costCrystal * CONFIG.score.crystalWeight;
 }
 
 export function computeScore(state: GameState, owner: PlayerId): number {

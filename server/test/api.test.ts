@@ -357,7 +357,7 @@ describe("owner key (browser id)", () => {
 
   it("a token-only (pre-key) bot is linked to the key by a claim with its token, and only then", async () => {
     // New bots need an owner key over HTTP; a pre-key bot only exists in old data, so create it directly.
-    const created = s.ladder.submit("legacy", STARTER, undefined);
+    const created = s.ladder.submit("legacy", STARTER, {});
     const legacy = { id: created.bot.id, token: created.token! };
     s.scheduler.enqueuePlacement(legacy.id);
     await s.scheduler.whenIdle();

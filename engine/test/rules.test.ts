@@ -200,7 +200,7 @@ describe("movement", () => {
   it("units cannot enter base, structure or node tiles", () => {
     const s = testState();
     addNode(s, "energy", 12, 10);
-    s.structures.push({ id: 90, owner: 2, type: "wall", x: 10, y: 12, hp: 40 });
+    s.structures.push({ upgraded: false, id: 90, owner: 2, type: "wall", x: 10, y: 12, hp: 40 });
     const a = addUnit(s, 1, "worker", 11, 10);
     const b = addUnit(s, 1, "worker", 10, 11);
     const c = addUnit(s, 1, "worker", 5, 4);
@@ -216,16 +216,6 @@ describe("movement", () => {
 });
 
 describe("spawning and upgrades", () => {
-  it("keeps the old global `upgrades` field (all false) so bots written for config 1.x don't crash", () => {
-    const s = testState();
-    const view = buildBotView(s, 1);
-    expect(view.upgrades).toEqual({ cargo: false, armor: false, weapons: false, scoutSpeed: false });
-    // An old-style upgrade action is rejected as invalid; it isn't a bot error.
-    const { events } = step(s, [{ type: "upgrade", upgrade: "armor" }], []);
-    expect(invalid(events)).toHaveLength(1);
-    expect(events.some((e) => e.type === "bot_error")).toBe(false);
-  });
-
   it("spawns next to base, deducts cost, one per tick", () => {
     const s = testState();
     const { state, events } = step(s, [{ type: "spawn", unit: "fighter" }, { type: "spawn", unit: "worker" }], []);
@@ -264,8 +254,8 @@ describe("spawning and upgrades", () => {
     const other = addUnit(s, 1, "scout", 10, 12);
     const fighter = addUnit(s, 1, "fighter", 10, 14);
     const enemyScout = addUnit(s, 2, "scout", 30, 30);
-    s.structures.push({ id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 60 });
-    s.structures.push({ id: 51, owner: 1, type: "wall", x: 13, y: 12, hp: 60 });
+    s.structures.push({ upgraded: false, id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 60 });
+    s.structures.push({ upgraded: false, id: 51, owner: 1, type: "wall", x: 13, y: 12, hp: 60 });
     const r1 = step(s, [
       { type: "upgrade", upgrade: "scout" },
       { type: "upgrade", upgrade: "fighter" },
@@ -301,37 +291,21 @@ describe("spawning and upgrades", () => {
     expect(unit(state, mine.id)!.x).toBe(mine.x + 4);
   });
 
-  it("the old per-entity form { targetId } still works and buys that entity's whole type", () => {
-    const s = testState();
-    const scout = addUnit(s, 1, "scout", 10, 10);
-    const other = addUnit(s, 1, "scout", 10, 12);
-    const { state, events } = step(s, [{ type: "upgrade", targetId: scout.id }, { type: "upgrade", targetId: other.id }], []);
-    expect(invalid(events).map((e) => e.type === "invalid_action" && e.reason)).toEqual(["duplicate upgrade"]);
-    expect(state.players[0].crystal).toBe(1000 - 15);
-    expect(unit(state, other.id)!.upgraded).toBe(true);
-  });
-
   it("upgrading damaged entities adds the extra max HP", () => {
     const s = testState();
     const scout = addUnit(s, 1, "scout", 10, 10, { hp: 2 });
-    s.structures.push({ id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 10 });
+    s.structures.push({ upgraded: false, id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 10 });
     const { state } = step(s, [{ type: "upgrade", upgrade: "scout" }, { type: "upgrade", upgrade: "wall" }], []);
     expect(unit(state, scout.id)!.hp).toBe(7);
     expect(state.structures[0]!.hp).toBe(70);
   });
 
-  it("rejects unknown upgrades, other types, enemy entities, missing targets and duplicates", () => {
+  it("rejects unknown upgrades, types without one, a missing type and duplicates", () => {
     const s = testState();
-    const worker = addUnit(s, 1, "worker", 10, 10);
-    const enemy = addUnit(s, 2, "scout", 30, 30);
-    s.structures.push({ id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
     const { events } = step(s, [
       { type: "upgrade", upgrade: "worker" },
       { type: "upgrade", upgrade: "armor" },
-      { type: "upgrade", targetId: worker.id },
-      { type: "upgrade", targetId: 50 },
-      { type: "upgrade", targetId: enemy.id },
-      { type: "upgrade", targetId: 99999 },
+      { type: "upgrade", upgrade: "constructor" },
       { type: "upgrade" },
       { type: "upgrade", upgrade: "scout" },
       { type: "upgrade", upgrade: "scout" },
@@ -339,11 +313,8 @@ describe("spawning and upgrades", () => {
     expect(invalid(events).map((e) => e.type === "invalid_action" && e.reason)).toEqual([
       "unknown upgrade",
       "unknown upgrade",
-      "worker has no upgrade",
-      "turret has no upgrade",
-      "no such unit or structure (or not yours)",
-      "no such unit or structure (or not yours)",
-      "missing upgrade",
+      "unknown upgrade",
+      "unknown upgrade",
       "duplicate upgrade",
     ]);
   });
@@ -367,7 +338,7 @@ describe("spawning and upgrades", () => {
     for (const energy of [49, 50]) {
       const s = testState();
       s.players[0].energy = energy;
-      s.structures.push({ id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 60 });
+      s.structures.push({ upgraded: false, id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 60 });
       const { state } = step(s, [{ type: "upgrade", upgrade: "wall" }], []);
       expect(state.structures[0]).toMatchObject({ hp: energy === 50 ? 120 : 60 });
       expect(state.players[0].energy).toBe(energy === 50 ? 0 : 49);
@@ -386,10 +357,6 @@ describe("spawning and upgrades", () => {
     expect(unit(state, scout.id)!.x).toBe(scout.x + 2);
   });
 
-  it("games without upgrades keep the same state shape (no `upgrades` on players), so old replay hashes still match", () => {
-    const { state } = step(testState(), [{ type: "spawn", unit: "scout" }], []);
-    expect("upgrades" in state.players[0]).toBe(false);
-  });
 });
 
 describe("harvest, deposit, build", () => {
@@ -529,7 +496,7 @@ describe("combat", () => {
 
   it("turrets ignore upgraded fighters and shoot the next valid target", () => {
     const s = testState();
-    s.structures.push({ id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
+    s.structures.push({ upgraded: false, id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
     const immune = addUnit(s, 2, "fighter", 9, 8, { hp: 1, upgraded: true });
     const plain = addUnit(s, 2, "fighter", 10, 8, { hp: 20 });
     const { state } = step(s, [], []);
@@ -545,7 +512,7 @@ describe("combat", () => {
 
   it("turrets hit the lowest-HP enemy in range, ties to lowest ID", () => {
     const s = testState();
-    s.structures.push({ id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
+    s.structures.push({ upgraded: false, id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
     const far = addUnit(s, 2, "worker", 13, 8, { hp: 1 }); // range 5: out
     const x = addUnit(s, 2, "fighter", 12, 8, { hp: 20 });
     const y = addUnit(s, 2, "fighter", 8, 12, { hp: 20 });
@@ -558,7 +525,7 @@ describe("combat", () => {
 
   it("fighters can damage structures and bases; cannot attack own entities", () => {
     const s = testState();
-    s.structures.push({ id: 50, owner: 2, type: "wall", x: 21, y: 20, hp: 40 });
+    s.structures.push({ upgraded: false, id: 50, owner: 2, type: "wall", x: 21, y: 20, hp: 40 });
     const a = addUnit(s, 1, "fighter", 20, 20);
     const b = addUnit(s, 1, "fighter", 34, 34);
     const c = addUnit(s, 1, "fighter", 5, 5);
@@ -666,7 +633,7 @@ describe("zone", () => {
     const s = testState({ tick: 432 }); // radius 19
     const out = addUnit(s, 1, "fighter", 2, 2, { upgraded: true });
     const inside = addUnit(s, 1, "fighter", 20, 20);
-    s.structures.push({ id: 60, owner: 2, type: "wall", x: 38, y: 38, hp: 40 });
+    s.structures.push({ upgraded: false, id: 60, owner: 2, type: "wall", x: 38, y: 38, hp: 40 });
     const { state } = step(s, [], []);
     expect(unit(state, out.id)!.hp).toBe(27);
     expect(unit(state, inside.id)!.hp).toBe(30);
@@ -689,7 +656,11 @@ describe("validation and robustness", () => {
       { type: "moveTo", unitId: u.id, x: 1.5, y: 5 },
       { type: "build", unitId: u.id, structure: "castle", x: 11, y: 10 },
       { type: "spawn", unit: "dragon" },
-      { type: "upgrade", targetId: "laser" },
+      { type: "spawn", unit: "constructor" },
+      { type: "constructor" },
+      { type: "hasOwnProperty", unitId: u.id },
+      { type: "build", unitId: u.id, structure: "toString", x: 11, y: 10 },
+      { type: "upgrade", upgrade: "laser" },
       { type: "mark", x: 1e9, y: 0 },
       { type: "harvest", unitId: u.id, nodeId: "x" },
       { type: "attack", unitId: u.id },

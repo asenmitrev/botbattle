@@ -62,6 +62,11 @@ export class Scheduler {
     return this.inFlight.size;
   }
 
+  /** Whether the workers are running (start() was called and stop() wasn't since). */
+  get started(): boolean {
+    return !this.stopped;
+  }
+
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;

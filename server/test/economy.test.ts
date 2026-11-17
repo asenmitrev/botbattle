@@ -181,14 +181,4 @@ describe("submission costs (Ladder)", () => {
     }
     expect(JSON.stringify(l.data)).toBe(before);
   });
-
-  it("owners from before botcoin get a wallet at startup", () => {
-    const { l } = ladder();
-    l.submit("old", "x", { owner: A });
-    delete l.data.economy!.wallets[Object.keys(l.data.economy!.wallets)[0]!];
-    expect(Object.keys(l.data.economy!.wallets)).toHaveLength(0);
-    expect(l.openLegacyWallets()).toBe(1);
-    expect(bal(l, A)).toBe(ECON.startingGrant);
-    expect(l.openLegacyWallets()).toBe(0);
-  });
 });

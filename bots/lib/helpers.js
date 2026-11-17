@@ -67,7 +67,7 @@ export function canAfford(state, what, count = 1) {
  */
 export function rememberMap(state, memory) {
   const n = state.mapSize * state.mapSize;
-  let chars = typeof memory.map === "string" && memory.map.length === n ? memory.map.split("") : new Array(n).fill("?");
+  const chars = typeof memory.map === "string" && memory.map.length === n ? memory.map.split("") : new Array(n).fill("?");
   const code = { floor: ".", wall: "#", energy_node: "E", crystal_node: "C" };
   for (const t of state.visibleTiles) chars[t.y * state.mapSize + t.x] = code[t.type];
   memory.map = chars.join("");

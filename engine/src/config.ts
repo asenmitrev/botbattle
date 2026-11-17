@@ -1,7 +1,8 @@
-// Single source of game constants. RULES.md must stay in sync with this file.
-// Bump CONFIG_VERSION whenever any value below changes (replays record it).
+// Single source of game constants. The stat tables in README.md are generated from this file
+// (`pnpm docs`; a test fails while they are stale). Bump CONFIG_VERSION whenever any value below
+// or any rule in step.ts changes: replays record it and only replay under the same version.
 
-export const CONFIG_VERSION = "2.1.0";
+export const CONFIG_VERSION = "3.0.0";
 
 export const CONFIG = {
   map: {
@@ -35,9 +36,9 @@ export const CONFIG = {
   base: { costEnergy: 100, costCrystal: 50, hp: 200, vision: 7, maxDistFromBase: Infinity },
 
   units: {
-    worker: { costEnergy: 50, costCrystal: 0, hp: 10, speed: 1, vision: 5, carry: 20, harvest: 5, damage: 0, range: 0 },
-    fighter: { costEnergy: 60, costCrystal: 15, hp: 30, speed: 1, vision: 5, carry: 0, harvest: 0, damage: 6, range: 1 },
-    scout: { costEnergy: 30, costCrystal: 0, hp: 5, speed: 2, vision: 9, carry: 0, harvest: 0, damage: 1, range: 1 },
+    worker: { costEnergy: 50, costCrystal: 0, hp: 10, speed: 1, vision: 5, carry: 20, harvest: 5, damage: 0, range: 0, canBuild: true },
+    fighter: { costEnergy: 60, costCrystal: 15, hp: 30, speed: 1, vision: 5, carry: 0, harvest: 0, damage: 6, range: 1, canBuild: false },
+    scout: { costEnergy: 30, costCrystal: 0, hp: 5, speed: 2, vision: 9, carry: 0, harvest: 0, damage: 1, range: 1, canBuild: false },
   },
 
   structures: {
@@ -52,15 +53,13 @@ export const CONFIG = {
 
   /**
    * Per-type upgrades, keyed by the unit/structure type they apply to. Bought once per player; applies to
-   * all of that player's entities of the type, current and future.
+   * all of that player's entities of the type, current and future. The effect fields are UpgradeEffect
+   * (below); rules read them only through stats.ts, so a new upgrade is a config entry, not a new `if`.
    */
   upgrades: {
-    /** Doubles the scout's speed and max HP. */
     scout: { costEnergy: 0, costCrystal: 15, speedMultiplier: 2, hpMultiplier: 2 },
-    /** Doubles the wall's max HP. */
     wall: { costEnergy: 50, costCrystal: 0, hpMultiplier: 2 },
-    /** Turrets ignore the fighter (no turret damage). */
-    fighter: { costEnergy: 0, costCrystal: 20 },
+    fighter: { costEnergy: 0, costCrystal: 20, turretImmune: true },
   },
 
   zone: {
@@ -118,8 +117,24 @@ export type BuildType = StructureType | "base";
 export type UpgradeType = keyof Config["upgrades"];
 export type NodeType = keyof Config["nodes"];
 
-export const UNIT_TYPES: readonly UnitType[] = ["worker", "fighter", "scout"];
-export const STRUCTURE_TYPES: readonly StructureType[] = ["turret", "wall"];
+/** What an upgrade may do. Every field is optional; a missing one means "no change". */
+export interface UpgradeEffect {
+  /** Multiplies the unit's speed. */
+  speedMultiplier?: number;
+  /** Multiplies max HP (current HP rises by the same amount when bought). */
+  hpMultiplier?: number;
+  /** Turrets never target this unit. */
+  turretImmune?: boolean;
+}
+// Compile-time check that every upgrade entry is a cost plus UpgradeEffect fields and nothing else.
+type Exact<T, Shape> = T extends Shape ? (Exclude<keyof T, keyof Shape> extends never ? T : never) : never;
+const _upgradesAreEffects: { [K in UpgradeType]: Exact<Config["upgrades"][K], UpgradeEffect & { costEnergy: number; costCrystal: number }> } = CONFIG.upgrades;
+void _upgradesAreEffects;
+
+const keys = <T extends object>(o: T) => Object.keys(o) as (keyof T & string)[];
+export const UNIT_TYPES: readonly UnitType[] = keys(CONFIG.units);
+export const STRUCTURE_TYPES: readonly StructureType[] = keys(CONFIG.structures);
 export const BUILD_TYPES: readonly BuildType[] = [...STRUCTURE_TYPES, "base"];
 /** Unit/structure types that have an upgrade. */
-export const UPGRADE_TYPES: readonly UpgradeType[] = ["scout", "wall", "fighter"];
+export const UPGRADE_TYPES: readonly UpgradeType[] = keys(CONFIG.upgrades);
+export const NODE_TYPES: readonly NodeType[] = keys(CONFIG.nodes);

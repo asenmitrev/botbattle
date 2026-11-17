@@ -9,5 +9,5 @@ import starterRaw from "../../bots/starter.js?raw";
 /** Sample bots, each bundled into a single module so the browser sandbox runs them like pasted code. */
 export const SAMPLE_BOTS: Record<string, string> = { greedy, rusher, balanced, aggressor, starter, idle };
 
-/** The editor's initial content (the BOT_API.md example). */
+/** The editor's initial content (the README example). */
 export const STARTER_SOURCE = starterRaw;

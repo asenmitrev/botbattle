@@ -24,7 +24,7 @@ export const SPRITE_URLS = {
 export type SpriteName = keyof typeof SPRITE_URLS;
 
 /** The sprite for an entity: its upgraded art when it is upgraded and has one, else the base art. */
-export const spriteFor = (type: string, upgraded?: boolean): SpriteName => {
+export const spriteFor = (type: string, upgraded: boolean): SpriteName => {
   const up = `${type}_up`;
   return (upgraded && up in SPRITE_URLS ? up : type) as SpriteName;
 };

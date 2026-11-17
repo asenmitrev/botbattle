@@ -41,8 +41,8 @@ export interface Unit extends Pos {
   type: UnitType;
   hp: number;
   cargo: Cargo;
-  /** Bought its type's upgrade (see CONFIG.upgrades). Absent in replays older than config 2.0.0. */
-  upgraded?: boolean;
+  /** Its owner bought this type's upgrade (see CONFIG.upgrades and stats.ts). */
+  upgraded: boolean;
 }
 
 export interface Structure extends Pos {
@@ -50,19 +50,16 @@ export interface Structure extends Pos {
   owner: PlayerId;
   type: StructureType;
   hp: number;
-  /** Bought its type's upgrade (see CONFIG.upgrades). Absent in replays older than config 2.0.0. */
-  upgraded?: boolean;
+  /** Its owner bought this type's upgrade (see CONFIG.upgrades and stats.ts). */
+  upgraded: boolean;
 }
 
 export interface PlayerState {
   id: PlayerId;
   energy: number;
   crystal: number;
-  /**
-   * Upgrade types this player has bought. Each applies to all of their units/walls of that type, current
-   * and future (see CONFIG.upgrades). Absent until the first purchase.
-   */
-  upgrades?: UpgradeType[];
+  /** Upgrade types this player has bought, in purchase order (see CONFIG.upgrades). */
+  upgrades: UpgradeType[];
 }
 
 export type Winner = PlayerId | "draw";
@@ -72,8 +69,8 @@ export interface MatchResult {
   /** "units" = more living units at the end; "score" = equal unit counts, decided by score. */
   reason: "base_destroyed" | "units" | "score" | "forfeit";
   scores: [number, number];
-  /** Living units per player when the match ended (absent in replays older than config 1.5.0). */
-  units?: [number, number];
+  /** Living units per player when the match ended. */
+  units: [number, number];
   tick: number;
 }
 
@@ -103,8 +100,6 @@ export type Action =
   | { type: "spawn"; unit: UnitType; baseId?: number }
   /** Buy a type's upgrade for all your units/walls of that type, current and future. */
   | { type: "upgrade"; upgrade: UpgradeType }
-  /** @deprecated (config 2.0.x): buys the upgrade for that entity's whole type. */
-  | { type: "upgrade"; targetId: number }
   | { type: "log"; text: string }
   | { type: "mark"; x: number; y: number; color?: string; label?: string };
 
@@ -115,15 +110,14 @@ export type EntityKind = "unit" | "structure" | "base";
 export type GameEvent =
   | { type: "invalid_action"; player: PlayerId; action: unknown; reason: string }
   | { type: "spawn"; player: PlayerId; unitId: number; unit: UnitType; x: number; y: number }
-  /** `targetId` only in replays from config 2.0.x, when upgrades were per entity. */
-  | { type: "upgrade"; player: PlayerId; upgrade: UpgradeType; targetId?: number }
+  | { type: "upgrade"; player: PlayerId; upgrade: UpgradeType }
   | { type: "harvest"; player: PlayerId; unitId: number; nodeId: number; resource: NodeType; amount: number }
   | { type: "deposit"; player: PlayerId; unitId: number; energy: number; crystal: number }
   | { type: "build"; player: PlayerId; unitId: number; structureId: number; structure: BuildType; x: number; y: number }
   | { type: "attack"; attackerId: number; targetId: number; damage: number }
   | { type: "zone_damage"; targetId: number; damage: number }
   | { type: "death"; id: number; kind: EntityKind; owner: PlayerId; x: number; y: number }
-  | { type: "base_destroyed"; player: PlayerId; baseId?: number }
+  | { type: "base_destroyed"; player: PlayerId; baseId: number }
   | { type: "log"; player: PlayerId; text: string }
   | { type: "mark"; player: PlayerId; x: number; y: number; color: string; label: string }
   | { type: "bot_error"; player: PlayerId; message: string }
