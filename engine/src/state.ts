@@ -1,4 +1,4 @@
-import { CONFIG, type StructureType, type UnitType } from "./config.js";
+import { CONFIG, type StructureType, type UnitType, type UpgradeType } from "./config.js";
 import { ADJ8, inBounds } from "./geometry.js";
 import { generateMap } from "./map.js";
 import { TILE, type Base, type GameState, type PlayerId, type PlayerState, type Pos, type Unit } from "./types.js";
@@ -48,7 +48,13 @@ export function createInitialState(seed: number): GameState {
 }
 
 export function makeUnit(state: GameState, owner: PlayerId, type: UnitType, pos: Pos): Unit {
-  return { id: state.nextId++, owner, type, x: pos.x, y: pos.y, hp: CONFIG.units[type].hp, cargo: { energy: 0, crystal: 0 }, upgraded: false };
+  const upgraded = hasUpgrade(state, owner, type);
+  return { id: state.nextId++, owner, type, x: pos.x, y: pos.y, hp: maxHp({ type, upgraded }), cargo: { energy: 0, crystal: 0 }, upgraded };
+}
+
+/** Whether `owner` has bought the upgrade for `type` (which then applies to all their entities of that type). */
+export function hasUpgrade(state: GameState, owner: PlayerId, type: UnitType | StructureType): boolean {
+  return !!state.players[owner - 1]?.upgrades?.includes(type as UpgradeType);
 }
 
 /** Occupancy grid: 1 for every tile blocked by terrain, nodes, bases, structures or units. */
@@ -81,6 +87,10 @@ export function findSpawnTile(state: GameState, owner: PlayerId, occ = occupancy
   return null;
 }
 
+// `upgrades` stays absent until something is bought, so state hashes of games without upgrades
+// (and their replays) are unchanged from config 2.0.0.
+const clonePlayer = (p: PlayerState): PlayerState => (p.upgrades ? { ...p, upgrades: [...p.upgrades] } : { ...p });
+
 export function cloneState(s: GameState): GameState {
   return {
     tick: s.tick,
@@ -89,8 +99,8 @@ export function cloneState(s: GameState): GameState {
     nodes: s.nodes.map((n) => ({ ...n })),
     bases: s.bases.map((b) => ({ ...b })),
     players: [
-      { ...s.players[0] },
-      { ...s.players[1] },
+      clonePlayer(s.players[0]),
+      clonePlayer(s.players[1]),
     ],
     units: s.units.map((u) => ({ ...u, cargo: { ...u.cargo } })),
     structures: s.structures.map((x) => ({ ...x })),

@@ -1,7 +1,7 @@
 // Single source of game constants. RULES.md must stay in sync with this file.
 // Bump CONFIG_VERSION whenever any value below changes (replays record it).
 
-export const CONFIG_VERSION = "2.0.0";
+export const CONFIG_VERSION = "2.1.0";
 
 export const CONFIG = {
   map: {
@@ -50,7 +50,10 @@ export const CONFIG = {
     crystal: { amount: 200, max: 200, regen: 0 },
   },
 
-  /** Per-entity upgrades, keyed by the unit/structure type they apply to. Each entity can be upgraded once. */
+  /**
+   * Per-type upgrades, keyed by the unit/structure type they apply to. Bought once per player; applies to
+   * all of that player's entities of the type, current and future.
+   */
   upgrades: {
     /** Doubles the scout's speed and max HP. */
     scout: { costEnergy: 0, costCrystal: 15, speedMultiplier: 2, hpMultiplier: 2 },

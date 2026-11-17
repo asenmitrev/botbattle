@@ -115,9 +115,14 @@ A worker builds on an empty floor tile adjacent to it. Building is instant and p
 
 ## 8. Upgrades
 
-Upgrades belong to a single entity: `{ type: "upgrade", targetId }` upgrades one of your living scouts,
-fighters or walls. Each entity can be upgraded once (`upgraded: true` afterwards). Units spawned later are not
-upgraded. There is no range requirement, and the upgrade takes effect immediately, on the tick it is bought.
+Upgrades are bought once per type: `{ type: "upgrade", upgrade: "scout" | "fighter" | "wall" }`. The upgrade
+then applies to **all** your entities of that type: every one you have now, and every one you spawn or build
+later (they start upgraded, at full upgraded HP). Each type can be bought once per match; `myUpgrades` shows
+which you own, and each entity carries `upgraded: true`. There is no range requirement, and the upgrade takes
+effect immediately, on the tick it is bought. You can buy a type's upgrade before you own any of that type.
+
+The config 2.0.x form `{ type: "upgrade", targetId }` is still accepted: it buys the upgrade for that entity's
+type (the target must be one of your living scouts, fighters or walls).
 
 | Target | Cost | Effect |
 |---|---|---|
@@ -126,8 +131,8 @@ upgraded. There is no range requirement, and the upgrade takes effect immediatel
 | Wall | 50 E | Max HP 60 → 120. |
 
 - When max HP doubles, current HP rises by the same amount (a wall at 10/60 becomes 70/120).
-- Workers, turrets and bases have no upgrade. Upgrading one gives an `invalid_action` (`"<type> has no upgrade"`).
-- An upgrade fails with `invalid_action` if the target is missing or not yours, already upgraded, listed twice in the same tick, or you can't cover the cost. Nothing is deducted when it fails.
+- Workers, turrets and bases have no upgrade. Asking for one gives an `invalid_action` (`"unknown upgrade"`, or `"<type> has no upgrade"` with `targetId`).
+- An upgrade fails with `invalid_action` if the type is already bought, listed twice in the same tick (also via two `targetId`s of the same type), the `targetId` is missing or not yours, or you can't cover the cost. Nothing is deducted when it fails.
 - Several upgrades per tick are allowed and are paid in action order.
 
 ## 9. Combat

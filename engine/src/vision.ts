@@ -1,4 +1,4 @@
-import { CONFIG, type NodeType, type StructureType, type UnitType } from "./config.js";
+import { CONFIG, UPGRADE_TYPES, type NodeType, type StructureType, type UnitType, type UpgradeType } from "./config.js";
 import { dist2 } from "./geometry.js";
 import { cargoCapacity, maxHp, zoneCenter, zoneRadius } from "./state.js";
 import { TILE, type GameState, type PlayerId, type Pos, type TileType } from "./types.js";
@@ -75,9 +75,11 @@ export interface BotState {
   myStructures: BotStructure[];
   energy: number;
   crystal: number;
+  /** Which per-type upgrades you have bought (each covers all your entities of that type, current and future). */
+  myUpgrades: Record<UpgradeType, boolean>;
   /**
-   * @deprecated Always all false: the global upgrades were replaced by per-unit ones in config 2.0.0
-   * (see `upgraded` on units and structures). Kept so bots written for the old API don't crash.
+   * @deprecated Always all false: the config 1.x upgrades (cargo/armor/weapons/scoutSpeed) are gone; see
+   * `myUpgrades`. Kept so bots written for the old API don't crash.
    */
   upgrades: { cargo: false; armor: false; weapons: false; scoutSpeed: false };
   visibleEnemies: BotEnemy[];
@@ -150,6 +152,7 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
       .map((s) => ({ id: s.id, type: s.type, x: s.x, y: s.y, hp: s.hp, maxHp: maxHp(s), upgraded: !!s.upgraded })),
     energy: me.energy,
     crystal: me.crystal,
+    myUpgrades: Object.fromEntries(UPGRADE_TYPES.map((t) => [t, !!me.upgrades?.includes(t)])) as Record<UpgradeType, boolean>,
     upgrades: { cargo: false, armor: false, weapons: false, scoutSpeed: false },
     visibleEnemies,
     visibleNodes: state.nodes.filter(seen).map((n) => ({ id: n.id, type: n.type, x: n.x, y: n.y, amount: n.amount })),

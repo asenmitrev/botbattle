@@ -11,7 +11,7 @@ export const COSTS = {
   base: { energy: 100, crystal: 50 },
 };
 
-/** Per-unit upgrade costs, keyed by the type being upgraded. */
+/** Upgrade costs, keyed by the type being upgraded (bought once, covers every unit/wall of that type). */
 export const UPGRADE_COSTS = {
   scout: { energy: 0, crystal: 15 },
   wall: { energy: 50, crystal: 0 },

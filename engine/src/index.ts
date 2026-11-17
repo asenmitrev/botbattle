@@ -10,6 +10,7 @@ export {
   cargoCapacity,
   unitSpeed,
   maxHp,
+  hasUpgrade,
   unitValue,
   zoneRadius,
   zoneCenter,

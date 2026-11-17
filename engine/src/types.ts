@@ -58,6 +58,11 @@ export interface PlayerState {
   id: PlayerId;
   energy: number;
   crystal: number;
+  /**
+   * Upgrade types this player has bought. Each applies to all of their units/walls of that type, current
+   * and future (see CONFIG.upgrades). Absent until the first purchase.
+   */
+  upgrades?: UpgradeType[];
 }
 
 export type Winner = PlayerId | "draw";
@@ -96,6 +101,9 @@ export type Action =
   | { type: "attack"; unitId: number; targetId: number }
   | { type: "build"; unitId: number; structure: BuildType; x: number; y: number }
   | { type: "spawn"; unit: UnitType; baseId?: number }
+  /** Buy a type's upgrade for all your units/walls of that type, current and future. */
+  | { type: "upgrade"; upgrade: UpgradeType }
+  /** @deprecated (config 2.0.x): buys the upgrade for that entity's whole type. */
   | { type: "upgrade"; targetId: number }
   | { type: "log"; text: string }
   | { type: "mark"; x: number; y: number; color?: string; label?: string };
@@ -107,7 +115,8 @@ export type EntityKind = "unit" | "structure" | "base";
 export type GameEvent =
   | { type: "invalid_action"; player: PlayerId; action: unknown; reason: string }
   | { type: "spawn"; player: PlayerId; unitId: number; unit: UnitType; x: number; y: number }
-  | { type: "upgrade"; player: PlayerId; targetId: number; upgrade: UpgradeType }
+  /** `targetId` only in replays from config 2.0.x, when upgrades were per entity. */
+  | { type: "upgrade"; player: PlayerId; upgrade: UpgradeType; targetId?: number }
   | { type: "harvest"; player: PlayerId; unitId: number; nodeId: number; resource: NodeType; amount: number }
   | { type: "deposit"; player: PlayerId; unitId: number; energy: number; crystal: number }
   | { type: "build"; player: PlayerId; unitId: number; structureId: number; structure: BuildType; x: number; y: number }

@@ -54,9 +54,8 @@ export function onTick(state, memory) {
     actions.push({ type: "spawn", unit: "fighter" });
     crystal -= 15;
   }
-  // Once there is an army, make fighters immune to turrets (one per tick, oldest first).
-  const plain = fighters.find((u) => !u.upgraded);
-  if (plain && fighters.length >= 3 && crystal >= 20) actions.push({ type: "upgrade", targetId: plain.id });
+  // Once there is an army, make all fighters (current and future) immune to turrets.
+  if (!state.myUpgrades.fighter && fighters.length >= 3 && crystal >= 20) actions.push({ type: "upgrade", upgrade: "fighter" });
 
   // Surplus energy (crystal is the real bottleneck) buys home turrets.
   const turrets = state.myStructures.filter((x) => x.type === "turret");

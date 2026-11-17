@@ -446,7 +446,7 @@ function renderStats(s: GameState): void {
   const sc = model.series.score;
   const count = (p: PlayerId, type: string) => s.units.filter((u) => u.owner === p && u.type === type).length;
   const turrets = (p: PlayerId) => s.structures.filter((x) => x.owner === p && x.type === "turret").length;
-  const ups = (p: PlayerId) => [...s.units, ...s.structures].filter((e) => e.owner === p && e.upgraded).length;
+  const ups = (p: PlayerId) => s.players[p - 1]!.upgrades?.join(", ") || "–";
   const row = (label: string, f: (p: PlayerId) => string | number) => `<tr><td>${label}</td><td>${f(1)}</td><td>${f(2)}</td></tr>`;
   $("stats").innerHTML = `
     <table class="stats-table">

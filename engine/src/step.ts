@@ -5,6 +5,7 @@ import {
   cloneState,
   computeScore,
   findSpawnTile,
+  hasUpgrade,
   makeUnit,
   maxHp,
   occupancy,
@@ -20,8 +21,8 @@ type UnitAction = Extract<Action, { unitId: number }>;
 interface Intents {
   unit: Map<number, UnitAction>;
   spawn: Extract<Action, { type: "spawn" }> | null;
-  /** Upgrade target IDs, in action order. */
-  upgrades: number[];
+  /** Upgrade types to buy, in action order. */
+  upgrades: UpgradeType[];
 }
 
 const PLAYERS: readonly PlayerId[] = [1, 2];
@@ -187,9 +188,20 @@ function collectIntents(state: GameState, player: PlayerId, raw: unknown, events
         break;
       }
       case "upgrade": {
-        if (!isInt(act.targetId)) invalid(sanitize(act), "missing targetId");
-        else if (intents.upgrades.includes(act.targetId)) invalid(sanitize(act), "duplicate upgrade");
-        else intents.upgrades.push(act.targetId);
+        // `{ upgrade: type }`; the config 2.0.x form `{ targetId }` still works and buys that entity's type.
+        let up: UpgradeType | null = null;
+        if (act.upgrade !== undefined) {
+          if (UPGRADE_TYPES.includes(act.upgrade as UpgradeType)) up = act.upgrade as UpgradeType;
+          else invalid(sanitize(act), "unknown upgrade");
+        } else if (isInt(act.targetId)) {
+          const target = state.units.find((u) => u.id === act.targetId) ?? state.structures.find((x) => x.id === act.targetId);
+          if (!target || target.owner !== player) invalid(sanitize(act), "no such unit or structure (or not yours)");
+          else if (!UPGRADE_TYPES.includes(target.type as UpgradeType)) invalid(sanitize(act), `${target.type} has no upgrade`);
+          else up = target.type as UpgradeType;
+        } else invalid(sanitize(act), "missing upgrade");
+        if (up === null) break;
+        if (intents.upgrades.includes(up)) invalid(sanitize(act), "duplicate upgrade");
+        else intents.upgrades.push(up);
         break;
       }
       case "move":
@@ -278,29 +290,27 @@ function sanitize(v: unknown): unknown {
 
 function applyUpgrades(state: GameState, player: PlayerId, intents: Intents, events: GameEvent[]): void {
   const p = state.players[player - 1]!;
-  for (const targetId of intents.upgrades) {
-    const action = { type: "upgrade", targetId };
+  // Left absent until the first purchase so games without upgrades hash exactly as before.
+  const owned = p.upgrades ?? [];
+  for (const up of intents.upgrades) {
+    const action = { type: "upgrade", upgrade: up };
     const fail = (reason: string) => events.push({ type: "invalid_action", player, action, reason });
-    const target = state.units.find((u) => u.id === targetId) ?? state.structures.find((x) => x.id === targetId);
-    if (!target || target.owner !== player) {
-      fail("no such unit or structure (or not yours)");
-      continue;
-    }
-    if (!UPGRADE_TYPES.includes(target.type as UpgradeType)) {
-      fail(`${target.type} has no upgrade`);
-      continue;
-    }
-    const up = target.type as UpgradeType;
     const cost = CONFIG.upgrades[up];
-    if (target.upgraded) fail("already upgraded");
+    if (owned.includes(up)) fail("already upgraded");
     else if (p.energy < cost.costEnergy || p.crystal < cost.costCrystal) fail("not enough resources");
     else {
       p.energy -= cost.costEnergy;
       p.crystal -= cost.costCrystal;
-      const before = maxHp(target);
-      target.upgraded = true;
-      target.hp += maxHp(target) - before;
-      events.push({ type: "upgrade", player, targetId, upgrade: up });
+      owned.push(up);
+      p.upgrades = owned;
+      // Applies at once to everything of that type the player has; later spawns/builds start upgraded.
+      for (const e of [...state.units, ...state.structures]) {
+        if (e.owner !== player || e.type !== up || e.upgraded) continue;
+        const before = maxHp(e);
+        e.upgraded = true;
+        e.hp += maxHp(e) - before;
+      }
+      events.push({ type: "upgrade", player, upgrade: up });
     }
   }
 }
@@ -567,7 +577,8 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
       if (r.act.structure === "base") {
         state.bases.push({ id, owner: p, x: r.act.x, y: r.act.y, hp: spec.hp });
       } else {
-        state.structures.push({ id, owner: p, type: r.act.structure, x: r.act.x, y: r.act.y, hp: spec.hp, upgraded: false });
+        const upgraded = hasUpgrade(state, p, r.act.structure);
+        state.structures.push({ id, owner: p, type: r.act.structure, x: r.act.x, y: r.act.y, hp: maxHp({ type: r.act.structure, upgraded }), upgraded });
       }
       events.push({ type: "build", player: p, unitId: r.unit.id, structureId: id, structure: r.act.structure, x: r.act.x, y: r.act.y });
     }

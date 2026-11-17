@@ -45,9 +45,10 @@ E = energy, C = crystal. A build or spawn needs the full cost in both resources.
 
 ### Upgrades
 
-Upgrades are bought for one specific unit or wall with `{ type: "upgrade", targetId }`. Each scout,
-fighter or wall can be upgraded once; units spawned later start without it. The upgrade takes effect
-immediately, on the tick it is bought.
+Upgrades are bought once per type with `{ type: "upgrade", upgrade: "scout" | "fighter" | "wall" }` and
+apply to all your entities of that type, including ones spawned or built later. The upgrade takes effect
+immediately, on the tick it is bought. (The older `{ type: "upgrade", targetId }` form still works and buys
+that entity's type.)
 
 | Upgrades | Cost | Effect |
 |---|---|---|

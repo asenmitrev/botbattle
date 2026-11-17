@@ -111,9 +111,10 @@ describe("movement", () => {
     expect(unit(s2, sc.id)).toMatchObject({ x: 12, y: 10 }); // wall right after
   });
 
-  it.each(["move", "moveTo"] as const)("the scout upgrade doubles only that scout's speed for %s on the purchase tick", (type) => {
+  it.each(["move", "moveTo"] as const)("the scout upgrade doubles all your scouts' speed for %s on the purchase tick", (type) => {
     const s = testState();
     const scout = addUnit(s, 1, "scout", 10, 10);
+    const scout2 = addUnit(s, 1, "scout", 10, 16);
     const worker = addUnit(s, 1, "worker", 10, 12);
     const fighter = addUnit(s, 1, "fighter", 10, 14);
     const enemy = addUnit(s, 2, "scout", 10, 20);
@@ -121,16 +122,19 @@ describe("movement", () => {
       ? { type, unitId: id, dir: "E" as const }
       : { type, unitId: id, x: 18, y };
     const { state, events } = step(s, [
-      { type: "upgrade", targetId: scout.id },
-      move(scout.id, 10), move(worker.id, 12), move(fighter.id, 14),
+      { type: "upgrade", upgrade: "scout" },
+      move(scout.id, 10), move(scout2.id, 16), move(worker.id, 12), move(fighter.id, 14),
     ], [move(enemy.id, 20)]);
     expect(unit(state, scout.id)).toMatchObject({ x: 14, y: 10 });
+    expect(unit(state, scout2.id)).toMatchObject({ x: 14, y: 16 });
     expect(unit(state, worker.id)!.x).toBe(11);
     expect(unit(state, fighter.id)!.x).toBe(11);
     expect(unit(state, enemy.id)!.x).toBe(12);
     expect(invalid(events)).toHaveLength(0);
     expect(buildBotView(state, 1).myUnits.find((u) => u.id === scout.id)).toMatchObject({ upgraded: true, hp: 10, maxHp: 10 });
     expect(buildBotView(state, 2).myUnits[0]!.upgraded).toBe(false);
+    expect(buildBotView(state, 1).myUpgrades).toEqual({ scout: true, wall: false, fighter: false });
+    expect(buildBotView(state, 2).myUpgrades).toEqual({ scout: false, wall: false, fighter: false });
   });
 
   it("upgraded scouts still stop at obstacles and map edges", () => {
@@ -254,60 +258,93 @@ describe("spawning and upgrades", () => {
     expect(invalid(step(boxed, [{ type: "spawn", unit: "worker" }], []).events)[0]).toMatchObject({ reason: "no free tile next to base" });
   });
 
-  it("upgrades are per unit, cost per type, and can be bought once per unit", () => {
+  it("an upgrade is bought once per type and covers every current entity of that type", () => {
     const s = testState();
     const scout = addUnit(s, 1, "scout", 10, 10);
     const other = addUnit(s, 1, "scout", 10, 12);
     const fighter = addUnit(s, 1, "fighter", 10, 14);
+    const enemyScout = addUnit(s, 2, "scout", 30, 30);
     s.structures.push({ id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 60 });
+    s.structures.push({ id: 51, owner: 1, type: "wall", x: 13, y: 12, hp: 60 });
     const r1 = step(s, [
-      { type: "upgrade", targetId: scout.id },
-      { type: "upgrade", targetId: fighter.id },
-      { type: "upgrade", targetId: 50 },
+      { type: "upgrade", upgrade: "scout" },
+      { type: "upgrade", upgrade: "fighter" },
+      { type: "upgrade", upgrade: "wall" },
     ], []);
     expect(invalid(r1.events)).toHaveLength(0);
     expect(r1.state.players[0].crystal).toBe(1000 - 15 - 20);
     expect(r1.state.players[0].energy).toBe(1000 - 50);
+    expect(r1.state.players[0].upgrades).toEqual(["scout", "fighter", "wall"]);
     expect(unit(r1.state, scout.id)).toMatchObject({ upgraded: true, hp: 10 });
-    expect(unit(r1.state, other.id)!.upgraded).toBeFalsy();
+    expect(unit(r1.state, other.id)).toMatchObject({ upgraded: true, hp: 10 });
     expect(unit(r1.state, fighter.id)).toMatchObject({ upgraded: true, hp: 30 });
-    expect(r1.state.structures[0]).toMatchObject({ upgraded: true, hp: 120 });
-    expect(r1.events).toContainEqual({ type: "upgrade", player: 1, targetId: scout.id, upgrade: "scout" });
-    const r2 = step(r1.state, [{ type: "upgrade", targetId: scout.id }], []);
+    expect(unit(r1.state, enemyScout.id)!.upgraded).toBeFalsy();
+    expect(r1.state.structures.map((x) => [x.upgraded, x.hp])).toEqual([[true, 120], [true, 120]]);
+    expect(r1.events).toContainEqual({ type: "upgrade", player: 1, upgrade: "scout" });
+    const r2 = step(r1.state, [{ type: "upgrade", upgrade: "scout" }], []);
     expect(invalid(r2.events)[0]).toMatchObject({ reason: "already upgraded" });
+    expect(r2.state.players[0].crystal).toBe(1000 - 15 - 20);
   });
 
-  it("upgrading a damaged entity adds the extra max HP", () => {
+  it("units spawned and walls built after the upgrade start upgraded, at full upgraded HP", () => {
+    const s = testState();
+    const w = addUnit(s, 1, "worker", 10, 10);
+    const r1 = step(s, [{ type: "upgrade", upgrade: "scout" }, { type: "upgrade", upgrade: "wall" }], []);
+    const r2 = step(r1.state, [{ type: "spawn", unit: "scout" }, { type: "build", unitId: w.id, structure: "wall", x: 11, y: 10 }], [{ type: "spawn", unit: "scout" }]);
+    expect(invalid(r2.events)).toHaveLength(0);
+    const mine = r2.state.units.find((u) => u.owner === 1 && u.type === "scout")!;
+    const theirs = r2.state.units.find((u) => u.owner === 2 && u.type === "scout")!;
+    expect(mine).toMatchObject({ upgraded: true, hp: 10 });
+    expect(theirs).toMatchObject({ upgraded: false, hp: 5 });
+    expect(r2.state.structures[0]).toMatchObject({ type: "wall", upgraded: true, hp: 120 });
+    const { state } = step(r2.state, [{ type: "move", unitId: mine.id, dir: "E" }], []);
+    expect(unit(state, mine.id)!.x).toBe(mine.x + 4);
+  });
+
+  it("the old per-entity form { targetId } still works and buys that entity's whole type", () => {
+    const s = testState();
+    const scout = addUnit(s, 1, "scout", 10, 10);
+    const other = addUnit(s, 1, "scout", 10, 12);
+    const { state, events } = step(s, [{ type: "upgrade", targetId: scout.id }, { type: "upgrade", targetId: other.id }], []);
+    expect(invalid(events).map((e) => e.type === "invalid_action" && e.reason)).toEqual(["duplicate upgrade"]);
+    expect(state.players[0].crystal).toBe(1000 - 15);
+    expect(unit(state, other.id)!.upgraded).toBe(true);
+  });
+
+  it("upgrading damaged entities adds the extra max HP", () => {
     const s = testState();
     const scout = addUnit(s, 1, "scout", 10, 10, { hp: 2 });
     s.structures.push({ id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 10 });
-    const { state } = step(s, [{ type: "upgrade", targetId: scout.id }, { type: "upgrade", targetId: 50 }], []);
+    const { state } = step(s, [{ type: "upgrade", upgrade: "scout" }, { type: "upgrade", upgrade: "wall" }], []);
     expect(unit(state, scout.id)!.hp).toBe(7);
     expect(state.structures[0]!.hp).toBe(70);
   });
 
-  it("rejects upgrades for other types, enemy entities, missing targets and duplicates", () => {
+  it("rejects unknown upgrades, other types, enemy entities, missing targets and duplicates", () => {
     const s = testState();
     const worker = addUnit(s, 1, "worker", 10, 10);
-    const scout = addUnit(s, 1, "scout", 10, 12);
     const enemy = addUnit(s, 2, "scout", 30, 30);
     s.structures.push({ id: 50, owner: 1, type: "turret", x: 8, y: 8, hp: 50 });
     const { events } = step(s, [
+      { type: "upgrade", upgrade: "worker" },
+      { type: "upgrade", upgrade: "armor" },
       { type: "upgrade", targetId: worker.id },
       { type: "upgrade", targetId: 50 },
       { type: "upgrade", targetId: enemy.id },
       { type: "upgrade", targetId: 99999 },
       { type: "upgrade" },
-      { type: "upgrade", targetId: scout.id },
-      { type: "upgrade", targetId: scout.id },
+      { type: "upgrade", upgrade: "scout" },
+      { type: "upgrade", upgrade: "scout" },
     ], []);
     expect(invalid(events).map((e) => e.type === "invalid_action" && e.reason)).toEqual([
-      "missing targetId",
-      "duplicate upgrade",
+      "unknown upgrade",
+      "unknown upgrade",
       "worker has no upgrade",
       "turret has no upgrade",
       "no such unit or structure (or not yours)",
       "no such unit or structure (or not yours)",
+      "missing upgrade",
+      "duplicate upgrade",
     ]);
   });
 
@@ -319,31 +356,39 @@ describe("spawning and upgrades", () => {
       const s = testState();
       s.players[0][res] = amount;
       const u = addUnit(s, 1, type, 10, 10);
-      const { state, events } = step(s, [{ type: "upgrade", targetId: u.id }], []);
+      const { state, events } = step(s, [{ type: "upgrade", upgrade: type }], []);
       expect(!!unit(state, u.id)!.upgraded).toBe(amount === ok);
       expect(state.players[0][res]).toBe(amount === ok ? 0 : amount);
       if (amount !== ok) expect(invalid(events)[0]).toMatchObject({ reason: "not enough resources" });
     }
   });
 
-  it("wall upgrade costs 50 energy", () => {
+  it("wall upgrade costs 50 energy, and can be bought before owning any wall", () => {
     for (const energy of [49, 50]) {
       const s = testState();
       s.players[0].energy = energy;
       s.structures.push({ id: 50, owner: 1, type: "wall", x: 12, y: 12, hp: 60 });
-      const { state } = step(s, [{ type: "upgrade", targetId: 50 }], []);
+      const { state } = step(s, [{ type: "upgrade", upgrade: "wall" }], []);
       expect(state.structures[0]).toMatchObject({ hp: energy === 50 ? 120 : 60 });
       expect(state.players[0].energy).toBe(energy === 50 ? 0 : 49);
     }
+    const none = step(testState(), [{ type: "upgrade", upgrade: "wall" }], []);
+    expect(invalid(none.events)).toHaveLength(0);
+    expect(none.state.players[0].upgrades).toEqual(["wall"]);
   });
 
-  it("newly spawned scouts are not upgraded", () => {
+  it("without the upgrade, newly spawned scouts are not upgraded", () => {
     const s = testState();
     const { state: spawned } = step(s, [{ type: "spawn", unit: "scout" }], []);
     const scout = spawned.units[0]!;
     expect(scout.upgraded).toBe(false);
     const { state } = step(spawned, [{ type: "move", unitId: scout.id, dir: "E" }], []);
     expect(unit(state, scout.id)!.x).toBe(scout.x + 2);
+  });
+
+  it("games without upgrades keep the same state shape (no `upgrades` on players), so old replay hashes still match", () => {
+    const { state } = step(testState(), [{ type: "spawn", unit: "scout" }], []);
+    expect("upgrades" in state.players[0]).toBe(false);
   });
 });
 

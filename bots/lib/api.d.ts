@@ -7,7 +7,7 @@ export type Dir = "N" | "S" | "E" | "W";
 export type UnitType = "worker" | "fighter" | "scout";
 export type StructureType = "turret" | "wall";
 export type BuildType = StructureType | "base";
-/** Types that have a per-unit upgrade. */
+/** Types that have an upgrade (bought once per type). */
 export type UpgradeType = "scout" | "wall" | "fighter";
 export type NodeType = "energy" | "crystal";
 export type TileType = "floor" | "wall" | "energy_node" | "crystal_node";
@@ -24,7 +24,7 @@ export interface MyUnit {
   cargo: { energy: number; crystal: number };
   /** 0 for units that cannot carry. */
   cargoCapacity: number;
-  /** This unit has bought its type's upgrade. */
+  /** Your upgrade for this unit's type is bought (see `myUpgrades`). */
   upgraded: boolean;
 }
 
@@ -60,7 +60,9 @@ export interface BotState {
   myStructures: MyStructure[];
   energy: number;
   crystal: number;
-  /** @deprecated Always all false since per-unit upgrades (config 2.0.0); use `upgraded` on units/structures. */
+  /** Which upgrades you have bought; each covers all your units/walls of that type, current and future. */
+  myUpgrades: Record<UpgradeType, boolean>;
+  /** @deprecated Always all false: the config 1.x upgrades are gone; use `myUpgrades`. */
   upgrades: { cargo: false; armor: false; weapons: false; scoutSpeed: false };
   visibleEnemies: Enemy[];
   visibleNodes: VisibleNode[];
@@ -79,7 +81,9 @@ export type Action =
   | { type: "attack"; unitId: number; targetId: number }
   | { type: "build"; unitId: number; structure: BuildType; x: number; y: number }
   | { type: "spawn"; unit: UnitType; baseId?: number }
-  /** Upgrade one of your scouts, fighters or walls (once per entity). */
+  /** Buy a type's upgrade once: it applies to all your scouts/fighters/walls of that type, current and future. */
+  | { type: "upgrade"; upgrade: UpgradeType }
+  /** @deprecated (config 2.0.x): still accepted, buys the upgrade for that entity's whole type. */
   | { type: "upgrade"; targetId: number }
   | { type: "log"; text: string }
   | { type: "mark"; x: number; y: number; color?: string; label?: string };

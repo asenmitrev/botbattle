@@ -50,7 +50,7 @@ restarts, so keep anything important in `memory`.
 | `pathTo(state, from, to, { map?, avoid? })` | BFS path `[{x, y, dir}]` over known terrain; `avoid` adds blocked tiles (e.g. units) |
 | `freeNeighbors(state, p)` | free tiles around `p` (8-neighborhood) |
 | `inSafeZone(state, p, margin?)` | whether `p` is inside next tick's zone |
-| `COSTS`, `UPGRADE_COSTS`, `DIRS` | spawn/build cost table; per-unit upgrade costs keyed by `"scout"`/`"fighter"`/`"wall"`; direction → `{x, y}` offset |
+| `COSTS`, `UPGRADE_COSTS`, `DIRS` | spawn/build cost table; upgrade costs keyed by `"scout"`/`"fighter"`/`"wall"`; direction → `{x, y}` offset |
 
 ## Game in one paragraph
 
@@ -85,6 +85,7 @@ Both bots act simultaneously.
               cargo: { energy, crystal }, cargoCapacity, upgraded }];
   myStructures: [{ id, type: "turret"|"wall", x, y, hp, maxHp, upgraded }];
   energy: number; crystal: number;  // banked
+  myUpgrades: { scout, fighter, wall }; // booleans: which per-type upgrades you have bought
   visibleEnemies: [{ id, kind: "unit"|"structure"|"base", type, x, y, hp, upgraded }]; // no `upgraded` on bases
   visibleNodes: [{ id, type: "energy"|"crystal", x, y, amount }];
   visibleTiles: [{ x, y, type: "floor"|"wall"|"energy_node"|"crystal_node" }];
@@ -113,7 +114,7 @@ Each unit gets at most **one** action per tick; extras are ignored.
 | `{ type: "attack", unitId, targetId }` | Fighter hits an adjacent enemy unit, structure or base. |
 | `{ type: "build", unitId, structure: "turret"\|"wall"\|"base", x, y }` | Worker builds on an adjacent empty floor tile. Bases cost 100 energy + 50 crystals and have no construction distance limit. |
 | `{ type: "spawn", unit: "worker"\|"fighter"\|"scout", baseId? }` | Spawn beside a living friendly base. Optional `baseId` selects it; otherwise try bases in ascending ID order. Max 1 spawn per player per tick. |
-| `{ type: "upgrade", targetId }` | Upgrades one of your scouts, fighters or walls (once per entity), effective immediately. |
+| `{ type: "upgrade", upgrade: "scout"\|"fighter"\|"wall" }` | Buys that type's upgrade once; it applies at once to all your entities of that type and to every one spawned/built later. (`{ type: "upgrade", targetId }` still works and buys that entity's type.) |
 | `{ type: "log", text }` | Message shown in the replay viewer. |
 | `{ type: "mark", x, y, color, label }` | Debug marker drawn in the replay viewer. |
 
@@ -127,9 +128,9 @@ Each unit gets at most **one** action per tick; extras are ignored.
 | Turret | 100 E | 50 | – | 4 | auto-shoots lowest-HP enemy unit within 4 for 4 dmg; must be within 8 of any living friendly base |
 | Wall | 3 E | 60 | – | – | blocks movement |
 | Base | 100 E + 50 C | 200 | – | 7 | deposits, spawning, turret placement within 8; immune to zone damage |
-| Scout upgrade | 15 C | ×2 (10) | ×2 (4) | | per scout |
-| Fighter upgrade | 20 C | | | | per fighter: turrets ignore it |
-| Wall upgrade | 50 E | ×2 (120) | | | per wall |
+| Scout upgrade | 15 C | ×2 (10) | ×2 (4) | | once, all your scouts |
+| Fighter upgrade | 20 C | | | | once, all your fighters: turrets ignore them |
+| Wall upgrade | 50 E | ×2 (120) | | | once, all your walls |
 
 Energy nodes hold 600 and regenerate 1/tick. Crystal nodes hold 200 and do not regenerate.
 Fighters need crystal, so you must contest the center.
