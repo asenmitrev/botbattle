@@ -8,8 +8,8 @@
     "arena": "node --no-node-snapshot --import tsx cli/src/index.ts",
     "playground": "pnpm --filter @arena/viewer dev",
     "server": "node --no-node-snapshot --import tsx cli/src/index.ts server",
-    "docs": "node --import tsx scripts/readme.ts",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "readme": "node --import tsx scripts/readme.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

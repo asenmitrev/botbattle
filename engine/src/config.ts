@@ -1,5 +1,5 @@
 // Single source of game constants. The stat tables in README.md are generated from this file
-// (`pnpm docs`; a test fails while they are stale). Bump CONFIG_VERSION whenever any value below
+// (`pnpm readme`; a test fails while they are stale). Bump CONFIG_VERSION whenever any value below
 // or any rule in step.ts changes: replays record it and only replay under the same version.
 
 export const CONFIG_VERSION = "3.1.0";

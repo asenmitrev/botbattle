@@ -370,7 +370,7 @@ pnpm install
 pnpm test                                     # engine rules, map, determinism, replay, ladder tests
 pnpm typecheck
 pnpm lint
-pnpm docs                                     # refresh the numbers in this README from the code
+pnpm readme                                   # refresh the numbers in this README from the code
 pnpm arena run bots/balanced.js bots/rusher.js --seed 42 --out replays/r.json
 pnpm arena tournament bots/*.js --rounds 20
 pnpm arena verify replays/r.json              # re-simulate and compare final state hash
@@ -545,4 +545,4 @@ do this).
 | `server/` | ranked ladder |
 | `cli/` | the `arena` command |
 | `bots/` | sample bots + `lib/helpers.js` (the `arena` helper library), `lib/api.d.ts` (bot API types, re-exported from the engine) |
-| `scripts/readme.ts` | fills the numbers in this README from the code (`pnpm docs`) |
+| `scripts/readme.ts` | fills the numbers in this README from the code (`pnpm readme`) |

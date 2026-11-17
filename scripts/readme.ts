@@ -1,5 +1,5 @@
 // README.md is the one document with all the rules. Its numbers are tied to the code with markers that
-// this script fills in (a test fails while README.md is stale; `pnpm docs` rewrites it):
+// this script fills in (a test fails while README.md is stale; `pnpm readme` rewrites it):
 //
 //   <!--v match.unitCap-->40<!--/v-->      a value: any JS expression over the names in SOURCES
 //   <!--table units-->…<!--/table-->        a whole table from TABLES

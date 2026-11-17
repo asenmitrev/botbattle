@@ -30,8 +30,8 @@ Any change to `config.ts` or to rule behaviour in `step.ts`:
 1. Bump `CONFIG_VERSION` (major for changes that break bots or the state shape, minor otherwise). Replays only
    play under the version they were recorded with.
 2. Update the Rules section of README.md in the same commit. Numbers in it are markers
-   (`<!--v units.scout.speed-->2<!--/v-->`, `<!--table units-->`) filled in by `pnpm docs`; use a marker for
-   any new number instead of typing it, and run `pnpm docs`. `test/readme.test.ts` fails while it's stale.
+   (`<!--v units.scout.speed-->2<!--/v-->`, `<!--table units-->`) filled in by `pnpm readme`; use a marker for
+   any new number instead of typing it, and run `pnpm readme`. `test/readme.test.ts` fails while it's stale.
 
 ## No compatibility shims
 
