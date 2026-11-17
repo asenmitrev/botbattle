@@ -6,6 +6,7 @@
  * inside ladder.json so results and coins are saved in one atomic write.
  */
 import { expectedScore } from "./elo.js";
+import { HttpError } from "./errors.js";
 import type { MatchRecord } from "./store.js";
 
 export const ECON = {
@@ -91,10 +92,11 @@ export function emptyEconomy(): EconomyData {
   return { wallets: {}, bets: [], nextBet: 1 };
 }
 
-export class EconomyError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
-  }
+export class EconomyError extends HttpError {}
+
+/** A player's game result from the winner: 1 win, 0.5 draw, 0 loss. */
+export function resultFor(winner: MatchRecord["winner"], player: 1 | 2): number {
+  return winner === "draw" ? 0.5 : winner === player ? 1 : 0;
 }
 
 /** Coins are kept to the cent; rounding after every change keeps float error from piling up. */
@@ -202,8 +204,8 @@ export class Economy {
    */
   recordGame(m: MatchRecord): void {
     const sides = [
-      { me: m.p1, opp: m.p2, result: m.winner === "draw" ? 0.5 : m.winner === 1 ? 1 : 0 },
-      { me: m.p2, opp: m.p1, result: m.winner === "draw" ? 0.5 : m.winner === 2 ? 1 : 0 },
+      { me: m.p1, opp: m.p2, result: resultFor(m.winner, 1) },
+      { me: m.p2, opp: m.p1, result: resultFor(m.winner, 2) },
     ];
     for (const s of sides) {
       const bet = this.openBet(s.me.id);

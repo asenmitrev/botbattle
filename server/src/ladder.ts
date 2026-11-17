@@ -1,9 +1,10 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { MatchResult } from "@arena/engine";
 import type { BotSource } from "@arena/sandbox";
-import { inProcessRunner, type MatchRun, type MatchRunner } from "./match-runner.js";
+import { botSeed, inProcessRunner, type MatchRun, type MatchRunner, type MatchSpec } from "./match-runner.js";
 import { ELO, kFactor, updateElo } from "./elo.js";
-import { dayKey, ECON, Economy, emptyEconomy, newBotPrice, publicBet } from "./economy.js";
+import { dayKey, ECON, Economy, emptyEconomy, newBotPrice, publicBet, resultFor } from "./economy.js";
+import { HttpError } from "./errors.js";
 import type { BotRecord, LadderData, LadderStore, MatchRecord } from "./store.js";
 
 export const NAME_RE = /^[A-Za-z0-9_-]{2,24}$/;
@@ -36,13 +37,35 @@ export interface LeaderboardRow {
   openBet: { stake: number; games: number; played: number } | null;
 }
 
-export class SubmitError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
-  }
-}
+export class SubmitError extends HttpError {}
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/** Wallet id (= ownerHash) of a browser owner key. Throws 400 on a malformed key. */
+function walletId(owner: string): string {
+  if (!OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
+  return sha256(owner);
+}
+
+/** Older call sites pass a bare token instead of credentials. */
+function toCredentials(cred: string | undefined | Credentials): Credentials {
+  return typeof cred === "object" ? cred : { token: cred };
+}
+
+/** Field checks every submission must pass before anything else is looked at. Throws 400. */
+export function validateSubmission(name: string, code: string, owner: string | undefined): void {
+  if (owner !== undefined && !OWNER_RE.test(owner)) throw new SubmitError(400, "owner must be 32-128 hex characters");
+  if (!NAME_RE.test(name)) throw new SubmitError(400, "name must be 2-24 characters: letters, digits, _ or -");
+  validateCode(code);
+}
+
+/** Bot code must be non-empty and at most MAX_CODE_BYTES. Throws 400. */
+export function validateCode(code: string): void {
+  if (!code.trim()) throw new SubmitError(400, "code is empty");
+  if (Buffer.byteLength(code, "utf8") > MAX_CODE_BYTES) throw new SubmitError(400, `code exceeds ${MAX_CODE_BYTES} bytes`);
+}
+
+export type SubmitQuote = { cost: number; wallet: string | null; balance: number; freeUpdate: boolean };
 
 export class Ladder {
   readonly data: LadderData;
@@ -76,7 +99,7 @@ export class Ladder {
    * newBotPrice). Each bot gets one free version per UTC day,
    * then ECON.updateCost. Bots with no owner key on record (legacy token-only) are free.
    */
-  quoteSubmit(name: string, owner: string | undefined): { cost: number; wallet: string | null; balance: number; freeUpdate: boolean } {
+  quoteSubmit(name: string, owner: string | undefined): SubmitQuote {
     const existing = this.byName(name);
     const h = existing?.ownerHash ?? (owner && OWNER_RE.test(owner) ? sha256(owner) : null);
     if (!h) return { cost: 0, wallet: null, balance: 0, freeUpdate: false };
@@ -120,14 +143,11 @@ export class Ladder {
 
   /** Wallet summary for an owner key. Opens the wallet (with the starting grant) on a browser's first visit. */
   walletView(owner: string) {
-    if (!OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
-    const h = sha256(owner);
+    const h = walletId(owner);
     if (this.economy.ensureWallet(h)) this.save();
     const w = this.economy.wallet(h);
     const today = dayKey(this.now());
-    const bots = this.data.bots
-      .filter((b) => !b.house && b.ownerHash && safeEqualHex(h, b.ownerHash))
-      .map((b) => ({ id: b.id, name: b.name, nextUpdateCost: b.lastFreeUpdateDay !== today ? 0 : ECON.updateCost }));
+    const bots = this.ownedBots(h).map((b) => ({ id: b.id, name: b.name, nextUpdateCost: b.lastFreeUpdateDay !== today ? 0 : ECON.updateCost }));
     const botIds = new Set(bots.map((b) => b.id));
     return {
       exists: !!w,
@@ -142,8 +162,7 @@ export class Ladder {
   }
 
   claimStipend(owner: string) {
-    if (!OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
-    this.economy.claimStipend(sha256(owner));
+    this.economy.claimStipend(walletId(owner));
     this.save();
     return this.walletView(owner);
   }
@@ -168,10 +187,9 @@ export class Ladder {
    * server). Free against house bots and your own bots, whose code you can already see.
    */
   chargeTestGame(owner: string, opponentId: string): { wallet: string; opponent: BotRecord; src: BotSource; free: boolean; cost: number; balance: number } {
-    if (!OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
+    const h = walletId(owner);
     const opp = this.bot(opponentId);
     if (!opp) throw new SubmitError(404, "no such bot");
-    const h = sha256(owner);
     this.economy.ensureWallet(h);
     const free = opp.house || this.owns(opp, { owner });
     const cost = free ? 0 : ECON.testGameCost;
@@ -220,10 +238,6 @@ export class Ladder {
     return b;
   }
 
-  /**
-   * Create or update a user bot. Validation of the code (sandbox init) is the caller's job.
-   * Returns the record and, for a new bot, the plaintext token (never stored).
-   */
   /** True if the credentials prove ownership of a user bot (its token, or the owner key that submitted it). */
   owns(b: BotRecord, cred: Credentials): boolean {
     if (b.house) return false;
@@ -233,8 +247,7 @@ export class Ladder {
 
   /** Bot ids owned by this owner key. Each `claims` entry whose token matches links that bot to the key (migrates token-only bots). */
   mine(owner: string, claims: { id: string; token: string }[] = []): string[] {
-    if (!OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
-    const h = sha256(owner);
+    const h = walletId(owner);
     let changed = false;
     for (const c of claims) {
       const b = this.bot(c.id);
@@ -245,28 +258,43 @@ export class Ladder {
       }
     }
     if (changed) this.save();
-    return this.data.bots.filter((b) => !b.house && b.ownerHash && safeEqualHex(h, b.ownerHash)).map((b) => b.id);
+    return this.ownedBots(h).map((b) => b.id);
   }
 
+  /**
+   * Everything `submit` checks before changing anything: fields, that the name is free or yours, and that you
+   * can pay. Changes nothing. Returns the bot being updated (if any) and the price.
+   */
+  checkSubmit(name: string, code: string, cred: Credentials): { existing: BotRecord | undefined; quote: SubmitQuote } {
+    validateSubmission(name, code, cred.owner);
+    const existing = this.byName(name);
+    if (existing?.house) throw new SubmitError(403, `"${existing.name}" is a house bot name`);
+    if (existing && !this.owns(existing, cred)) {
+      throw new SubmitError(403, `"${existing.name}" is taken; updating it requires its token`);
+    }
+    const quote = this.quoteSubmit(name, cred.owner);
+    if (quote.cost > quote.balance) {
+      throw new SubmitError(
+        402,
+        `not enough botcoin: ${existing ? "another version today" : "a new bot"} costs ${quote.cost}, you have ${quote.balance}`,
+        { cost: quote.cost, balance: quote.balance },
+      );
+    }
+    return { existing, quote };
+  }
+
+  /**
+   * Create or update a user bot. Validation of the code (sandbox init) is the caller's job.
+   * Returns the record and, for a new bot, the plaintext token (never stored).
+   */
   submit(
     name: string,
     code: string,
     cred: string | undefined | Credentials,
   ): { bot: BotRecord; token: string | null; created: boolean; cost: number; balance: number | null } {
-    const { token, owner } = typeof cred === "object" ? cred : { token: cred, owner: undefined };
-    if (owner !== undefined && !OWNER_RE.test(owner)) throw new SubmitError(400, "bad owner key");
-    if (!NAME_RE.test(name)) throw new SubmitError(400, "name must be 2-24 characters: letters, digits, _ or -");
-    if (Buffer.byteLength(code, "utf8") > MAX_CODE_BYTES) throw new SubmitError(400, `code exceeds ${MAX_CODE_BYTES} bytes`);
-    const existing = this.byName(name);
-    if (existing?.house) throw new SubmitError(403, `"${existing.name}" is a house bot name`);
-    if (existing && !this.owns(existing, { token, owner })) {
-      throw new SubmitError(403, `"${existing.name}" is taken; updating it requires its token`);
-    }
+    const { token, owner } = toCredentials(cred);
     // Botcoin: check the price before changing anything, then open the wallet if needed and pay.
-    const quote = this.quoteSubmit(name, owner);
-    if (quote.cost > quote.balance) {
-      throw new SubmitError(402, `not enough botcoin: ${existing ? "another version today" : "a new bot"} costs ${quote.cost}, you have ${quote.balance}`);
-    }
+    const { existing, quote } = this.checkSubmit(name, code, { token, owner });
     const pay = (botName: string) => {
       if (!quote.wallet) return;
       this.economy.ensureWallet(quote.wallet);
@@ -302,7 +330,7 @@ export class Ladder {
    * (match records embed names), so opponents' histories still render.
    */
   deleteBot(id: string, cred: string | undefined | Credentials): BotRecord {
-    const c: Credentials = typeof cred === "object" ? cred : { token: cred };
+    const c = toCredentials(cred);
     const b = this.bot(id);
     if (!b) throw new SubmitError(404, "no such bot");
     if (b.house) throw new SubmitError(403, `"${b.name}" is a house bot`);
@@ -320,6 +348,21 @@ export class Ladder {
     const s = this.data.nextSeed++;
     this.save();
     return s;
+  }
+
+  private matchSpec(a: BotRecord, b: BotRecord, seed: number): MatchSpec {
+    return {
+      seed,
+      bots: [
+        { src: this.source(a), rngSeed: botSeed(seed, 1) },
+        { src: this.source(b), rngSeed: botSeed(seed, 2) },
+      ],
+    };
+  }
+
+  /** Rated and unrated games share one counter, so ids never collide. */
+  private newMatchId(prefix: string): string {
+    return `${prefix}${String(this.data.nextMatch++).padStart(7, "0")}`;
   }
 
   private source(b: BotRecord): BotSource {
@@ -342,21 +385,15 @@ export class Ladder {
     const gone = () => this.bot(a.id) !== a || this.bot(b.id) !== b;
     let outcome: MatchRun;
     try {
-      outcome = await this.runner({
-        seed,
-        bots: [
-          { src: this.source(a), rngSeed: (seed * 2 + 1) >>> 0 },
-          { src: this.source(b), rngSeed: (seed * 2 + 2) >>> 0 },
-        ],
-      });
+      outcome = await this.runner(this.matchSpec(a, b, seed));
     } catch (e) {
       if (gone()) return null; // e.g. its code file vanished mid-setup
       throw e;
     }
     if (gone()) return null;
     const res = outcome.result;
-    const id = `m${String(this.data.nextMatch++).padStart(7, "0")}`;
-    const scoreA = res.winner === "draw" ? 0.5 : res.winner === 1 ? 1 : 0;
+    const id = this.newMatchId("m");
+    const scoreA = resultFor(res.winner, 1);
     // A version bump during the game: the result still counts, but against the new version's provisional counter.
     const [ea, eb] = updateElo(a.elo, b.elo, scoreA, kFactor(a.gamesSinceVersion), kFactor(b.gamesSinceVersion));
     const at = new Date().toISOString();
@@ -392,14 +429,8 @@ export class Ladder {
     const a = this.bot(p1Id);
     const b = this.bot(p2Id);
     if (!a || !b) throw new Error("unknown bot");
-    const outcome = await this.runner({
-      seed,
-      bots: [
-        { src: this.source(a), rngSeed: (seed * 2 + 1) >>> 0 },
-        { src: this.source(b), rngSeed: (seed * 2 + 2) >>> 0 },
-      ],
-    });
-    const id = `${prefix}${String(this.data.nextMatch++).padStart(7, "0")}`;
+    const outcome = await this.runner(this.matchSpec(a, b, seed));
+    const id = this.newMatchId(prefix);
     outcome.replay.bots = [a.name, b.name];
     this.store.saveReplay(id, outcome.replay);
     this.save();

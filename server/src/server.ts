@@ -5,10 +5,10 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Replay } from "@arena/engine";
-import { IsolatedBot } from "@arena/sandbox";
 import { ECON, EconomyError } from "./economy.js";
-import { Ladder, MAX_CODE_BYTES, NAME_RE, OWNER_RE, SubmitError } from "./ladder.js";
-import { MatchPool, playMatch, type MatchRunner } from "./match-runner.js";
+import { HttpError } from "./errors.js";
+import { Ladder, MAX_CODE_BYTES, OWNER_RE, validateCode, validateSubmission } from "./ladder.js";
+import { botSeed, initErrorOf, MatchPool, playMatch, type MatchRunner } from "./match-runner.js";
 import { Scheduler, type SchedulerOptions } from "./scheduler.js";
 import { createPlayoff, runPlayoff, savePlayoff, PLAYOFF_FILE, type Playoff } from "./playoff.js";
 import { Seasons, startNewSeason } from "./seasons.js";
@@ -113,11 +113,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     if (rest === "highscore") return json(res, 200, s.ladder.topScore());
     if (rest === "playoff") return json(res, 200, seasons!.playoff(id));
     let m = /^bots\/([A-Za-z0-9_-]+)\/matches$/.exec(rest);
-    if (m) {
-      if (!s.ladder.bot(m[1]!)) return json(res, 404, { error: "no such bot" });
-      const lim = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 20));
-      return json(res, 200, s.ladder.recentMatches(m[1]!, lim));
-    }
+    if (m) return botMatches(res, url, s.ladder, m[1]!);
     m = /^matches\/([A-Za-z0-9_-]+)\/replay$/.exec(rest);
     if (m) {
       const replay = s.store.loadReplay(m[1]!);
@@ -128,8 +124,9 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
 
   const server = http.createServer((req, res) => {
     handle(req, res).catch((e) => {
-      if (!res.headersSent) json(res, 500, { error: e instanceof Error ? e.message : String(e) });
-      else res.end();
+      if (res.headersSent) res.end();
+      else if (e instanceof HttpError) json(res, e.status, { error: e.message, ...e.extra });
+      else json(res, 500, { error: e instanceof Error ? e.message : String(e) });
     });
   });
 
@@ -159,18 +156,14 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
       if (req.method === "POST" && p === "/api/wallet") return econ(req, res, (b) => ladder.walletView(str(b.owner)));
       if (req.method === "POST" && p === "/api/wallet/stipend") return econ(req, res, (b) => ladder.claimStipend(str(b.owner)));
       if (req.method === "GET" && p === "/api/bets") {
-        return json(res, 200, ladder.recentBets(Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50))));
+        return json(res, 200, ladder.recentBets(limitParam(url, 50)));
       }
       if (req.method === "GET" && p === "/api/highscore") return json(res, 200, ladder.topScore());
       if (req.method === "POST" && p === "/api/bots") return submit(req, res);
       if (req.method === "POST" && p === "/api/mine") return mine(req, res);
       if (req.method === "POST" && p === "/api/test-game") return testGame(req, res);
       let m = /^\/api\/bots\/([A-Za-z0-9_-]+)\/matches$/.exec(p);
-      if (req.method === "GET" && m) {
-        if (!ladder.bot(m[1]!)) return json(res, 404, { error: "no such bot" });
-        const lim = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 20));
-        return json(res, 200, ladder.recentMatches(m[1]!, lim));
-      }
+      if (req.method === "GET" && m) return botMatches(res, url, ladder, m[1]!);
       m = /^\/api\/bots\/([A-Za-z0-9_-]+)$/.exec(p);
       if (req.method === "DELETE" && m) return removeBot(req, res, m[1]!);
       m = /^\/api\/bots\/([A-Za-z0-9_-]+)\/(boost|bet)$/.exec(p);
@@ -217,12 +210,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
    * with GET /api/playoff.
    */
   async function endSeasonRoute(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    let body: { password?: unknown; minElo?: unknown };
-    try {
-      body = JSON.parse(await readBody(req, 4 * 1024)) as typeof body;
-    } catch {
-      return json(res, 400, { error: "body must be JSON {password, minElo?}" });
-    }
+    const body = await readJson(req, 4 * 1024, "body must be JSON {password, minElo?}");
     if (!adminOk(str(body.password))) {
       await new Promise((r) => setTimeout(r, 1000)); // slow down guessing
       return json(res, 403, { error: "wrong password" });
@@ -276,53 +264,22 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
 
   /** DELETE /api/bots/:id {token}: the owner removes a user bot. History and replays are kept. */
   async function removeBot(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
-    let token: string | undefined;
-    let owner: string | undefined;
-    try {
-      const raw = await readBody(req, 4 * 1024);
-      const body = raw.trim() ? (JSON.parse(raw) as { token?: unknown; owner?: unknown }) : {};
-      token = typeof body.token === "string" ? body.token : undefined;
-      owner = typeof body.owner === "string" ? body.owner : undefined;
-    } catch {
-      return json(res, 400, { error: "body must be JSON {token?, owner?}" });
-    }
-    try {
-      const b = ladder.deleteBot(id, { token, owner });
-      scheduler.dropBot(b.id);
-      log(`deleted ${b.name} (${b.id})`);
-      return json(res, 200, { deleted: b.id });
-    } catch (e) {
-      if (e instanceof SubmitError) return json(res, e.status, { error: e.message });
-      throw e;
-    }
+    const body = await readJson(req, 4 * 1024, "body must be JSON {token?, owner?}", true);
+    const b = ladder.deleteBot(id, { token: optStr(body.token), owner: optStr(body.owner) });
+    scheduler.dropBot(b.id);
+    log(`deleted ${b.name} (${b.id})`);
+    return json(res, 200, { deleted: b.id });
   }
 
   /** POST JSON body → `fn(body)` → 200 JSON. Ladder/economy errors map to their HTTP status. */
   async function econ(req: http.IncomingMessage, res: http.ServerResponse, fn: (body: Record<string, unknown>) => unknown): Promise<void> {
-    let body: Record<string, unknown>;
-    try {
-      const raw = await readBody(req, 4 * 1024);
-      body = raw.trim() ? (JSON.parse(raw) as Record<string, unknown>) : {};
-      if (!body || typeof body !== "object") throw new Error("not an object");
-    } catch {
-      return json(res, 400, { error: "body must be a JSON object" });
-    }
-    try {
-      return json(res, 200, fn(body));
-    } catch (e) {
-      if (e instanceof SubmitError || e instanceof EconomyError) return json(res, e.status, { error: e.message });
-      throw e;
-    }
+    const body = await readJson(req, 4 * 1024, "body must be a JSON object", true);
+    return json(res, 200, fn(body));
   }
 
   /** POST /api/mine {owner, claims?: [{id, token}]}: ids of the bots this browser owns (claims link token-only bots to it). */
   async function mine(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    let body: { owner?: unknown; claims?: unknown };
-    try {
-      body = JSON.parse(await readBody(req, 64 * 1024));
-    } catch {
-      return json(res, 400, { error: "body must be JSON {owner, claims?}" });
-    }
+    const body = await readJson(req, 64 * 1024, "body must be JSON {owner, claims?}");
     if (typeof body.owner !== "string" || !OWNER_RE.test(body.owner)) return json(res, 400, { error: "owner must be 32-128 hex characters" });
     const claims = (Array.isArray(body.claims) ? body.claims : [])
       .slice(0, 100)
@@ -337,40 +294,26 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
    * refunded. Responds {replay, cost, balance}.
    */
   async function testGame(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    let body: { owner?: unknown; code?: unknown; opponent?: unknown; seed?: unknown; side?: unknown };
-    try {
-      body = JSON.parse(await readBody(req, MAX_CODE_BYTES + 16 * 1024));
-    } catch (e) {
-      return json(res, 400, { error: e instanceof Error && e.message === "too large" ? "request too large" : "body must be JSON {owner, code, opponent, seed, side}" });
-    }
+    const body = await readJson(req, MAX_CODE_BYTES + 16 * 1024, "body must be JSON {owner, code, opponent, seed, side}");
     const owner = str(body.owner);
     const code = str(body.code);
     const seed = Number(body.seed);
     const side = Number(body.side);
     if (!OWNER_RE.test(owner)) return json(res, 400, { error: "owner must be 32-128 hex characters" });
-    if (!code.trim()) return json(res, 400, { error: "code is empty" });
-    if (Buffer.byteLength(code, "utf8") > MAX_CODE_BYTES) return json(res, 400, { error: `code exceeds ${MAX_CODE_BYTES} bytes` });
+    validateCode(code);
     if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) return json(res, 400, { error: "seed must be a whole number from 0 to 4294967295" });
     if (side !== 1 && side !== 2) return json(res, 400, { error: "side must be 1 or 2" });
     const opp = ladder.bot(str(body.opponent));
     if (!opp) return json(res, 404, { error: "no such bot" });
-    const key = owner;
-    if (testing.has(key)) return json(res, 429, { error: "a test game is already running for this wallet" });
-    testing.add(key);
+    if (testing.has(owner)) return json(res, 429, { error: "a test game is already running for this wallet" });
+    testing.add(owner);
     try {
-      const probe = await IsolatedBot.create({ source: code, name: "my-bot" });
-      const initError = probe.initError;
-      probe.dispose();
+      const initError = await initErrorOf(code, "my-bot");
       if (initError) return json(res, 400, { error: initError, initError: true });
-      let charge: ReturnType<Ladder["chargeTestGame"]>;
-      try {
-        charge = ladder.chargeTestGame(owner, opp.id);
-      } catch (e) {
-        if (e instanceof SubmitError || e instanceof EconomyError) return json(res, e.status, { error: e.message });
-        throw e;
-      }
-      const mine = { src: { source: code, name: "my-bot" }, rngSeed: (seed * 2 + side) >>> 0 };
-      const theirs = { src: charge.src, rngSeed: (seed * 2 + (3 - side)) >>> 0 };
+      const charge = ladder.chargeTestGame(owner, opp.id);
+      const other = side === 1 ? 2 : 1;
+      const mine = { src: { source: code, name: "my-bot" }, rngSeed: botSeed(seed, side) };
+      const theirs = { src: charge.src, rngSeed: botSeed(seed, other) };
       let replay: Replay;
       try {
         ({ replay } = await testRunner({ seed, bots: side === 1 ? [mine, theirs] : [theirs, mine] }));
@@ -380,10 +323,10 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
         return json(res, 500, { error: "the server couldn't play this game; you weren't charged" });
       }
       replay.bots = side === 1 ? ["my-bot", opp.name] : [opp.name, "my-bot"];
-      if (!charge.free) redactOpponent(replay, side === 1 ? 2 : 1);
+      if (!charge.free) redactOpponent(replay, other);
       return json(res, 200, { replay, cost: charge.cost, balance: ladder.economy.wallet(charge.wallet)!.balance });
     } finally {
-      testing.delete(key);
+      testing.delete(owner);
     }
   }
 
@@ -393,52 +336,31 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     const now = Date.now();
     const recent = (submissions.get(ip) ?? []).filter((t) => now - t < limit.windowMs);
     if (recent.length >= limit.max) return json(res, 429, { error: `rate limit: ${limit.max} submissions per ${Math.round(limit.windowMs / 60000)} min` });
-    let body: { name?: unknown; code?: unknown; token?: unknown; owner?: unknown };
-    try {
-      body = JSON.parse(await readBody(req, MAX_CODE_BYTES + 16 * 1024));
-    } catch (e) {
-      return json(res, 400, { error: e instanceof Error && e.message === "too large" ? "request too large" : "body must be JSON {name, code, token?}" });
-    }
+    const body = await readJson(req, MAX_CODE_BYTES + 16 * 1024, "body must be JSON {name, code, token?}");
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    const code = typeof body.code === "string" ? body.code : "";
-    const token = typeof body.token === "string" ? body.token : undefined;
-    const owner = typeof body.owner === "string" ? body.owner : undefined;
-    if (owner !== undefined && !OWNER_RE.test(owner)) return json(res, 400, { error: "owner must be 32-128 hex characters" });
-    if (!NAME_RE.test(name)) return json(res, 400, { error: "name must be 2-24 characters: letters, digits, _ or -" });
-    if (!code.trim()) return json(res, 400, { error: "code is empty" });
-    if (Buffer.byteLength(code, "utf8") > MAX_CODE_BYTES) return json(res, 400, { error: `code exceeds ${MAX_CODE_BYTES} bytes` });
+    const code = str(body.code);
+    const token = optStr(body.token);
+    const owner = optStr(body.owner);
+    validateSubmission(name, code, owner);
     recent.push(now);
     submissions.set(ip, recent);
-    // Check ownership before spending sandbox time on validation.
-    const existing = ladder.byName(name);
-    if (existing?.house) return json(res, 403, { error: `"${existing.name}" is a house bot name` });
-    if (existing && !ladder.owns(existing, { token, owner })) return json(res, 403, { error: `"${existing.name}" is taken; updating it requires its token` });
+    // Check ownership and price before spending sandbox time on validation.
+    const { existing } = ladder.checkSubmit(name, code, { token, owner });
     if (!existing && !owner) return json(res, 400, { error: "a new bot needs an owner key (the browser's botcoin wallet)" });
-    const quote = ladder.quoteSubmit(name, owner);
-    if (quote.cost > quote.balance) {
-      return json(res, 402, { error: `not enough botcoin: ${existing ? "another version today" : "a new bot"} costs ${quote.cost}, you have ${quote.balance}`, cost: quote.cost, balance: quote.balance });
-    }
-    const probe = await IsolatedBot.create({ source: code, name });
-    const initError = probe.initError;
-    probe.dispose();
+    const initError = await initErrorOf(code, name);
     if (initError) return json(res, 400, { error: initError });
-    try {
-      const r = ladder.submit(name, code, { token, owner });
-      const placementGames = scheduler.enqueuePlacement(r.bot.id);
-      log(`${r.created ? "new bot" : "updated"} ${r.bot.name} v${r.bot.version} (${r.bot.id})`);
-      return json(res, r.created ? 201 : 200, {
-        id: r.bot.id,
-        name: r.bot.name,
-        version: r.bot.version,
-        ...(r.token ? { token: r.token } : {}),
-        placementGames,
-        cost: r.cost,
-        balance: r.balance,
-      });
-    } catch (e) {
-      if (e instanceof SubmitError) return json(res, e.status, { error: e.message });
-      throw e;
-    }
+    const r = ladder.submit(name, code, { token, owner });
+    const placementGames = scheduler.enqueuePlacement(r.bot.id);
+    log(`${r.created ? "new bot" : "updated"} ${r.bot.name} v${r.bot.version} (${r.bot.id})`);
+    return json(res, r.created ? 201 : 200, {
+      id: r.bot.id,
+      name: r.bot.name,
+      version: r.bot.version,
+      ...(r.token ? { token: r.token } : {}),
+      placementGames,
+      cost: r.cost,
+      balance: r.balance,
+    });
   }
 
   await new Promise<void>((resolve) => server.listen(opts.port ?? 8787, opts.host ?? "127.0.0.1", resolve));
@@ -473,12 +395,42 @@ function redactOpponent(replay: Replay, player: 1 | 2): void {
   }
 }
 
+/** GET `?limit=`, clamped to 1-200. */
+function limitParam(url: URL, def: number): number {
+  return Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || def));
+}
+
+/** GET …/bots/:id/matches on a ladder (live or archived). */
+function botMatches(res: http.ServerResponse, url: URL, ladder: Ladder, id: string): void {
+  if (!ladder.bot(id)) return json(res, 404, { error: "no such bot" });
+  return json(res, 200, ladder.recentMatches(id, limitParam(url, 20)));
+}
+
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const optStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
   res.end(JSON.stringify(body));
+}
+
+/** Read a JSON object body (an empty body reads as `{}` when `allowEmpty`). Anything else is a 400 with `usage`. */
+async function readJson(req: http.IncomingMessage, max: number, usage: string, allowEmpty = false): Promise<Record<string, unknown>> {
+  let raw: string;
+  try {
+    raw = await readBody(req, max);
+  } catch (e) {
+    throw new HttpError(400, e instanceof Error && e.message === "too large" ? "request too large" : usage);
+  }
+  if (allowEmpty && !raw.trim()) return {};
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    throw new HttpError(400, usage);
+  }
+  if (!body || typeof body !== "object") throw new HttpError(400, usage);
+  return body as Record<string, unknown>;
 }
 
 function readBody(req: http.IncomingMessage, max: number): Promise<string> {

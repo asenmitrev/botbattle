@@ -18,6 +18,21 @@ export interface MatchRun {
   replay: Replay;
 }
 
+/** Math.random seed for the bot playing `player` in a match on `seed`. */
+export function botSeed(seed: number, player: 1 | 2): number {
+  return (seed * 2 + player) >>> 0;
+}
+
+/** Whether `source` fails to load in the sandbox: its init error, or null if it loads. */
+export async function initErrorOf(source: string, name: string): Promise<string | null> {
+  const probe = await IsolatedBot.create({ source, name });
+  try {
+    return probe.initError;
+  } finally {
+    probe.dispose();
+  }
+}
+
 /** Plays a match: in this thread, or on a worker pool. */
 export type MatchRunner = (spec: MatchSpec) => Promise<MatchRun>;
 
