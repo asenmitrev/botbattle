@@ -5,7 +5,6 @@ import {
   RACES,
   STRUCTURE_TYPES,
   UNIT_TYPES,
-  UPGRADE_TYPES,
   countTotal,
   matrixTotal,
   runMatch,
@@ -22,7 +21,7 @@ import readmeSource from "../../README.md?raw";
 import { SAMPLE_BOTS, STARTER_SOURCE } from "./bots.js";
 import { LineChart } from "./charts.js";
 import { createEditor } from "./editor.js";
-import { BoardRenderer, tumorIcon, type RenderOptions } from "./renderer.js";
+import { BoardRenderer, type RenderOptions } from "./renderer.js";
 import { ReplayModel, type Series } from "./replay-model.js";
 import { WorkerBot } from "./worker-bot.js";
 import { initLadder, owner } from "./ladder.js";
@@ -78,7 +77,7 @@ const raceTypes = (race: Race): { key: string; label: string; type: string }[] =
  */
 function renderLegend(replay: Replay | null): void {
   const races: Race[] = replay ? [...new Set(replay.races)] : [...RACES];
-  const icon = (key: string) => tumorIcon(key) ?? (key in SPRITE_URLS ? SPRITE_URLS[key as keyof typeof SPRITE_URLS] : undefined);
+  const icon = (key: string) => (key in SPRITE_URLS ? SPRITE_URLS[key as keyof typeof SPRITE_URLS] : undefined);
   $("legend").innerHTML = races
     .map((race) => {
       const who = replay
@@ -86,7 +85,8 @@ function renderLegend(replay: Replay | null): void {
         : "";
       const items = [
         ...raceTypes(race).map((e) => [e.key, e.label] as const),
-        ...UPGRADE_TYPES.filter((u) => (CONFIG.races[race].upgrades as readonly string[]).includes(u)).map((u) => [`${u}_up`, `Upgraded ${u}`] as const),
+        // Upgraded art: every type of the race that has an `_up` sprite.
+        ...raceTypes(race).filter((e) => `${e.key}_up` in SPRITE_URLS).map((e) => [`${e.key}_up`, `Upgraded ${e.label}`] as const),
       ]
         .map(([k, label]) => [icon(k), label] as const)
         .filter(([src]) => src)

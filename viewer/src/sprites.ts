@@ -9,6 +9,13 @@ import base from "./sprites/base.png";
 import fighterUp from "./sprites/fighter_up.png";
 import scoutUp from "./sprites/scout_up.png";
 import wallUp from "./sprites/wall_up.png";
+// Tumor race (same process: one fal.ai sheet on chroma-key green, pale membranes so they tint by team).
+import tumorCell from "./sprites/tumorCell.png";
+import stemCell from "./sprites/stemCell.png";
+import immuneCell from "./sprites/immuneCell.png";
+import purificationCell from "./sprites/purificationCell.png";
+import siegeCell from "./sprites/siegeCell.png";
+import immuneCellUp from "./sprites/immuneCell_up.png";
 
 export const SPRITE_URLS = {
   worker,
@@ -20,6 +27,12 @@ export const SPRITE_URLS = {
   fighter_up: fighterUp,
   scout_up: scoutUp,
   wall_up: wallUp,
+  tumorCell,
+  stemCell,
+  immuneCell,
+  purificationCell,
+  siegeCell,
+  immuneCell_up: immuneCellUp,
 } as const;
 export type SpriteName = keyof typeof SPRITE_URLS;
 

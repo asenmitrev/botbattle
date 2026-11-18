@@ -144,8 +144,10 @@ export class BoardRenderer {
       const bx = Math.min(Math.max(b.x * c + c / 2, half), boardPx - half);
       const by = Math.min(Math.max(b.y * c + c / 2, half + c * 0.3), boardPx - half);
       if (race === "tumor") {
-        // Tumor Cell: a round cell with a dark nucleus, plus its build zone outline for its owner.
-        this.drawCell(bx, by, c * 0.75, playerColor(b.owner), c * 0.3);
+        // Tumor Cell: team-tinted cell-mass art (a plain cell while it loads), plus its build zone for its owner.
+        const img = tintedSprite("tumorCell", playerColor(b.owner), 0.3);
+        if (img) ctx.drawImage(img, bx - c * 0.85, by - c * 0.85, c * 1.7, c * 1.7);
+        else this.drawCell(bx, by, c * 0.75, playerColor(b.owner), c * 0.3);
         if (opts.fog === 0 || opts.fog === b.owner) {
           const r = placementRange("purificationCell", race, state.players[b.owner - 1]!.upgrades);
           ctx.strokeStyle = playerColor(b.owner);
@@ -179,7 +181,7 @@ export class BoardRenderer {
       }
     }
     for (const s of state.structures) {
-      if (s.type !== "turret") continue;
+      if (s.type !== "turret" && s.type !== "siegeCell") continue;
       const tgt = turretTargets.get(s.id);
       if (tgt) this.turretAim.set(s.id, Math.atan2(tgt.y - s.y, tgt.x - s.x));
       else if (!this.turretAim.has(s.id)) {
@@ -195,23 +197,17 @@ export class BoardRenderer {
       const x = s.x * c;
       const y = s.y * c;
       if (s.type === "purificationCell" || s.type === "siegeCell") {
-        // Tumor buildings: cells. Purification has a cross; Siege has a long spine toward its target.
-        this.drawCell(x + c / 2, y + c / 2, c * 0.46, col, 0);
-        ctx.strokeStyle = "#f0efec";
-        ctx.lineWidth = Math.max(1, c * 0.12);
-        ctx.beginPath();
-        if (s.type === "purificationCell") {
-          ctx.moveTo(x + c / 2, y + c * 0.25);
-          ctx.lineTo(x + c / 2, y + c * 0.75);
-          ctx.moveTo(x + c * 0.25, y + c / 2);
-          ctx.lineTo(x + c * 0.75, y + c / 2);
-        } else {
-          const tgt = turretTargets.get(s.id);
-          const a = tgt ? Math.atan2(tgt.y - s.y, tgt.x - s.x) : -Math.PI / 4;
-          ctx.moveTo(x + c / 2, y + c / 2);
-          ctx.lineTo(x + c / 2 + Math.cos(a) * c * 0.6, y + c / 2 + Math.sin(a) * c * 0.6);
-        }
-        ctx.stroke();
+        // Tumor buildings: team-tinted art. The Siege Cell's spine (drawn pointing north) turns toward its
+        // target, holding aim between shots like a turret. While the art loads: a plain cell.
+        const img = tintedSprite(s.type, col, 0.3);
+        if (img) {
+          const rot = s.type === "siegeCell" ? (this.turretAim.get(s.id) ?? -Math.PI / 4) + Math.PI / 2 : 0;
+          ctx.save();
+          ctx.translate(x + c / 2, y + c / 2);
+          ctx.rotate(rot);
+          ctx.drawImage(img, -c * 0.55, -c * 0.55, c * 1.1, c * 1.1);
+          ctx.restore();
+        } else this.drawCell(x + c / 2, y + c / 2, c * 0.46, col, 0);
         if (opts.fog === 0 || opts.fog === s.owner) {
           ctx.strokeStyle = col;
           ctx.globalAlpha = 0.15;
@@ -265,16 +261,17 @@ export class BoardRenderer {
       const upgraded = u.upgrades.length > 0;
       // Upgraded units keep more of their art so the cyan glow survives the team tint.
       const img = tintedSprite(spriteFor(u.type, upgraded), col, upgraded ? 0.5 : 0.3);
-      if (u.type === "stemCell" || u.type === "immuneCell") {
-        // Tumor units: small round stem cells, larger lumpy immune cells.
-        this.drawCell(cx, cy, c * (u.type === "stemCell" ? 0.3 : 0.42), col, u.type === "stemCell" ? c * 0.12 : 0, u.type === "immuneCell");
-      } else if (img) {
-        // Faction-tinted art, no backing plate. Size encodes role:
-        // workers are small, fighters loom over their tile, scouts sit in between.
-        const size = c * (u.type === "worker" ? 0.85 : u.type === "fighter" ? 1.3 : 1.05) * (upgraded ? 1.12 : 1);
+      if (img) {
+        // Faction-tinted art, no backing plate. Size encodes role: workers and Stem Cells are small,
+        // fighters loom over their tile, scouts and Immune Cells sit in between.
+        const role = { worker: 0.85, stemCell: 0.8, fighter: 1.3, immuneCell: 1.15 } as Record<string, number>;
+        const size = c * (role[u.type] ?? 1.05) * (upgraded ? 1.12 : 1);
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
+      } else if (u.type === "stemCell" || u.type === "immuneCell") {
+        // While the art loads: small round stem cells, larger lumpy immune cells.
+        this.drawCell(cx, cy, c * (u.type === "stemCell" ? 0.3 : 0.42), col, u.type === "stemCell" ? c * 0.12 : 0, u.type === "immuneCell");
       } else {
         ctx.fillStyle = col;
         ctx.strokeStyle = COLORS.floor;
@@ -454,44 +451,4 @@ function paintCell(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: num
     ctx.arc(cx, cy, nucleus, 0, Math.PI * 2);
     ctx.fill();
   }
-}
-
-const iconCache = new Map<string, string>();
-
-/**
- * A legend icon (data URL) for the Tumor race's entities, drawn like the board draws them, or undefined for
- * types that have sprite art. `type` is a unit/structure type, or "tumorCell" for the Tumor base.
- */
-export function tumorIcon(type: string): string | undefined {
-  if (!["tumorCell", "stemCell", "immuneCell", "purificationCell", "siegeCell"].includes(type)) return undefined;
-  const cached = iconCache.get(type);
-  if (cached) return cached;
-  const size = 44;
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const c = size / 2;
-  const tint = "#c98aa6";
-  if (type === "tumorCell") paintCell(ctx, c, c, size * 0.4, tint, size * 0.16);
-  else if (type === "stemCell") paintCell(ctx, c, c, size * 0.26, tint, size * 0.1);
-  else if (type === "immuneCell") paintCell(ctx, c, c, size * 0.38, tint, 0, true);
-  else {
-    paintCell(ctx, c, c, size * 0.38, tint, 0);
-    ctx.strokeStyle = "#f0efec";
-    ctx.lineWidth = size * 0.1;
-    ctx.beginPath();
-    if (type === "purificationCell") {
-      ctx.moveTo(c, size * 0.25);
-      ctx.lineTo(c, size * 0.75);
-      ctx.moveTo(size * 0.25, c);
-      ctx.lineTo(size * 0.75, c);
-    } else {
-      ctx.moveTo(c, c);
-      ctx.lineTo(size * 0.82, size * 0.18);
-    }
-    ctx.stroke();
-  }
-  const url = canvas.toDataURL();
-  iconCache.set(type, url);
-  return url;
 }
