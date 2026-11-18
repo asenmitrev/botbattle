@@ -42,7 +42,8 @@ function errText(e: unknown): string {
   }
 }
 
-async function init(source: string, seed: number): Promise<void> {
+/** Loads the bot; returns its `race` export (checked by the host). */
+async function init(source: string, seed: number): Promise<string | undefined> {
   const helpersUrl = createURL(new Blob([helpersSource], { type: "text/javascript" }));
   const rewritten = source.replace(/(\bfrom\s*|\bimport\s*)(["'])arena\2/g, `$1"${helpersUrl}"`);
   const badImport = /\bimport\s*(?:[\w*{}\s,]+from\s*)?["'](?!blob:)([^"']+)["']/.exec(rewritten);
@@ -55,14 +56,16 @@ async function init(source: string, seed: number): Promise<void> {
   const fn = typeof mod.onTick === "function" ? mod.onTick : mod.default?.onTick;
   if (typeof fn !== "function") throw new TypeError("bot must export a function onTick(state, memory)");
   tick = makeTickFunction(fn, parse, stringify);
+  const race: unknown = mod.race !== undefined ? mod.race : mod.default?.race;
+  return typeof race === "string" || race === undefined ? race : String(race);
 }
 
 scope.addEventListener("message", async (ev: MessageEvent<InMsg>) => {
   const msg = ev.data;
   if (msg.type === "init") {
     try {
-      await init(msg.source, msg.seed);
-      post({ type: "ready" });
+      const race = await init(msg.source, msg.seed);
+      post({ type: "ready", race });
     } catch (e) {
       post({ type: "initError", message: errText(e) });
     }

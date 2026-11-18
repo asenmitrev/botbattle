@@ -2,7 +2,7 @@ import type { BotState, Dir, Memory, Pos, UpgradeType } from "./api";
 
 export declare const DIRS: Record<Dir, Pos>;
 export declare const COSTS: Record<
-  "worker" | "fighter" | "scout" | "turret" | "wall" | "base",
+  "worker" | "fighter" | "scout" | "turret" | "wall" | "base" | "stemCell" | "immuneCell" | "purificationCell" | "siegeCell" | "tumorCell",
   { energy: number; crystal: number }
 >;
 export declare const UPGRADE_COSTS: Record<UpgradeType, { energy: number; crystal: number }>;

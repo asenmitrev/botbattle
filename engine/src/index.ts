@@ -3,7 +3,7 @@ export * from "./types.js";
 export * from "./geometry.js";
 export { Rng } from "./rng.js";
 export { generateMap, validateMap, tileAt, type GeneratedMap } from "./map.js";
-export { createInitialState, cloneState, computeScore, hasUpgrade, zoneRadius, zoneCenter, occupancy } from "./state.js";
+export { createInitialState, cloneState, computeScore, ownedUpgradesFor, raceOf, zoneRadius, zoneCenter, occupancy } from "./state.js";
 export * from "./stats.js";
 export * from "./match-stats.js";
 export { step, forfeit } from "./step.js";

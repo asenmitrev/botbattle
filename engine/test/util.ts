@@ -1,8 +1,9 @@
-import { CONFIG, type UnitType } from "../src/config.js";
+import { CONFIG, type Race, type UnitType } from "../src/config.js";
 import { TILE, type GameState, type PlayerId, type Unit } from "../src/types.js";
 
 /** Open 40x40 map, bases at (4,4) and (35,35), no nodes, no units. Positions are free-form for rule tests. */
-export function testState(opts: { walls?: [number, number][]; tick?: number } = {}): GameState {
+export function testState(opts: { walls?: [number, number][]; tick?: number; races?: [Race, Race] } = {}): GameState {
+  const races = opts.races ?? ["classic", "classic"];
   const size = CONFIG.map.size;
   const tiles = new Array(size * size).fill(TILE.floor);
   for (const [x, y] of opts.walls ?? []) tiles[y * size + x] = TILE.wall;
@@ -12,12 +13,12 @@ export function testState(opts: { walls?: [number, number][]; tick?: number } = 
     map: { size, tiles: tiles.join("") },
     nodes: [],
     bases: [
-      { id: 1, owner: 1, x: 4, y: 4, hp: CONFIG.base.hp },
-      { id: 2, owner: 2, x: 35, y: 35, hp: CONFIG.base.hp },
+      { id: 1, owner: 1, x: 4, y: 4, hp: CONFIG.races[races[0]].base.hp },
+      { id: 2, owner: 2, x: 35, y: 35, hp: CONFIG.races[races[1]].base.hp },
     ],
     players: [
-      { id: 1, energy: 1000, crystal: 1000, upgrades: [] },
-      { id: 2, energy: 1000, crystal: 1000, upgrades: [] },
+      { id: 1, race: races[0], energy: 1000, crystal: 1000, upgrades: [] },
+      { id: 2, race: races[1], energy: 1000, crystal: 1000, upgrades: [] },
     ],
     units: [],
     structures: [],
@@ -27,7 +28,7 @@ export function testState(opts: { walls?: [number, number][]; tick?: number } = 
 }
 
 export function addUnit(s: GameState, owner: PlayerId, type: UnitType, x: number, y: number, extra: Partial<Unit> = {}): Unit {
-  const u: Unit = { id: s.nextId++, owner, type, x, y, hp: CONFIG.units[type].hp, cargo: { energy: 0, crystal: 0 }, upgraded: false, ...extra };
+  const u: Unit = { id: s.nextId++, owner, type, x, y, hp: CONFIG.units[type].hp, cargo: { energy: 0, crystal: 0 }, upgrades: [], ...extra };
   s.units.push(u);
   s.units.sort((a, b) => a.id - b.id);
   return u;

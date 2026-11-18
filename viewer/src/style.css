@@ -74,6 +74,9 @@ body.split-dragging .pane { pointer-events: none; }
 .result-banner { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); background: rgba(18,18,17,.9); border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px; font-weight: 600; white-space: nowrap; }
 
 .side { flex: 0 0 220px; display: flex; flex-direction: column; gap: 10px; }
+/* Stats and legend scroll when two races don't fit beside the board. */
+.side-scroll { display: flex; flex-direction: column; gap: 10px; max-height: min(420px, calc(100vh - 330px)); overflow-y: auto; padding-right: 2px; }
+.stats-table tr.race-head td { text-align: left; color: var(--text-secondary); font-weight: 600; padding-top: 6px; border-bottom: 1px solid var(--border); }
 .stats-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .stats-table th, .stats-table td { padding: 2px 4px; text-align: right; }
 .stats-table th:first-child, .stats-table td:first-child { text-align: left; color: var(--text-muted); font-weight: normal; }
@@ -201,7 +204,9 @@ dialog.readme::backdrop { background: rgba(0,0,0,.6); }
 .delta.down { color: #ff8f8f; }
 
 /* ---- unit legend */
-.legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 6px; font-size: 11px; color: var(--text-secondary); }
+.legend { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-secondary); }
+.legend-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 6px; }
+.legend-race { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border); padding-bottom: 2px; }
 .legend-item { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .legend-item img { width: 22px; height: 22px; flex: none; border-radius: 50%; background: var(--surface-2, #2a2a28); }
 .legend-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

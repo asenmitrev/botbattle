@@ -2,6 +2,7 @@ import "./style.css";
 import { marked } from "marked";
 import {
   CONFIG,
+  RACES,
   STRUCTURE_TYPES,
   UNIT_TYPES,
   UPGRADE_TYPES,
@@ -14,13 +15,14 @@ import {
   type MatchResult,
   type PlayerId,
   type PlayerMatchStats,
+  type Race,
   type Replay,
 } from "@arena/engine";
 import readmeSource from "../../README.md?raw";
 import { SAMPLE_BOTS, STARTER_SOURCE } from "./bots.js";
 import { LineChart } from "./charts.js";
 import { createEditor } from "./editor.js";
-import { BoardRenderer, type RenderOptions } from "./renderer.js";
+import { BoardRenderer, tumorIcon, type RenderOptions } from "./renderer.js";
 import { ReplayModel, type Series } from "./replay-model.js";
 import { WorkerBot } from "./worker-bot.js";
 import { initLadder, owner } from "./ladder.js";
@@ -59,15 +61,42 @@ const opts: RenderOptions = { fog: 0, marks: true, attacks: true };
 
 const board = new BoardRenderer($<HTMLCanvasElement>("board"));
 
-// Legend: what each sprite on the board is.
-const title = (t: string) => t[0]!.toUpperCase() + t.slice(1);
-$("legend").innerHTML = [
-  ...[...UNIT_TYPES, ...STRUCTURE_TYPES, "base"].map((t) => [t, title(t)]),
-  ...UPGRADE_TYPES.map((t) => [`${t}_up`, `Upgraded ${t}`]),
-]
-  .filter(([k]) => k! in SPRITE_URLS)
-  .map(([k, label]) => `<div class="legend-item"><img src="${SPRITE_URLS[k as keyof typeof SPRITE_URLS]}" alt="" /><span>${label}</span></div>`)
-  .join("");
+/** "immuneCell" → "Immune Cell". */
+const title = (t: string) => t[0]!.toUpperCase() + t.slice(1).replace(/([A-Z])/g, " $1");
+/** What a race calls its base. */
+const baseName = (race: Race) => (race === "tumor" ? "Tumor Cell" : "Base");
+/** The board's entities of one race, in legend/stats order: base, units, structures. */
+const raceTypes = (race: Race): { key: string; label: string; type: string }[] => [
+  { key: race === "tumor" ? "tumorCell" : "base", label: baseName(race), type: "base" },
+  ...CONFIG.races[race].units.map((t) => ({ key: t as string, label: title(t), type: t as string })),
+  ...CONFIG.races[race].structures.map((t) => ({ key: t as string, label: title(t), type: t as string })),
+];
+
+/**
+ * Legend: what each thing on the board is, one block per race in play (both races before a replay loads),
+ * each headed by the race and the players who play it.
+ */
+function renderLegend(replay: Replay | null): void {
+  const races: Race[] = replay ? [...new Set(replay.races)] : [...RACES];
+  const icon = (key: string) => tumorIcon(key) ?? (key in SPRITE_URLS ? SPRITE_URLS[key as keyof typeof SPRITE_URLS] : undefined);
+  $("legend").innerHTML = races
+    .map((race) => {
+      const who = replay
+        ? ([1, 2] as const).filter((p) => replay.races[p - 1] === race).map((p) => `<span class="dot p${p}"></span>`).join("")
+        : "";
+      const items = [
+        ...raceTypes(race).map((e) => [e.key, e.label] as const),
+        ...UPGRADE_TYPES.filter((u) => (CONFIG.races[race].upgrades as readonly string[]).includes(u)).map((u) => [`${u}_up`, `Upgraded ${u}`] as const),
+      ]
+        .map(([k, label]) => [icon(k), label] as const)
+        .filter(([src]) => src)
+        .map(([src, label]) => `<div class="legend-item"><img src="${src}" alt="" /><span title="${label}">${label}</span></div>`)
+        .join("");
+      return `<div class="legend-race">${who}<span>${title(race)}</span></div><div class="legend-grid">${items}</div>`;
+    })
+    .join("");
+}
+renderLegend(null);
 const charts: Record<keyof Series, LineChart> = {} as Record<keyof Series, LineChart>;
 for (const el of document.querySelectorAll<HTMLElement>(".chart")) {
   charts[el.dataset.series as keyof Series] = new LineChart(el, (i) => seek(i));
@@ -308,6 +337,7 @@ function showReplay(replay: Replay, fromLadderView = false): boolean {
     return false;
   }
   currentReplay = replay;
+  renderLegend(replay);
   $<HTMLButtonElement>("download-btn").disabled = false;
   const scrub = $<HTMLInputElement>("scrubber");
   scrub.max = String(model.lastIndex);
@@ -460,9 +490,27 @@ function renderStats(s: GameState): void {
   if (!model) return;
   const names = model.replay.bots;
   const sc = model.series.score;
-  const count = (p: PlayerId, type: string) => [...s.units, ...s.structures].filter((e) => e.owner === p && e.type === type).length;
+  const count = (p: PlayerId, type: string) =>
+    type === "base"
+      ? s.bases.filter((b) => b.owner === p && b.hp > 0).length
+      : [...s.units, ...s.structures].filter((e) => e.owner === p && e.type === type).length;
   const ups = (p: PlayerId) => s.players[p - 1]!.upgrades.join(", ") || "–";
   const row = (label: string, f: (p: PlayerId) => string | number) => `<tr><td>${label}</td><td>${f(1)}</td><td>${f(2)}</td></tr>`;
+  const races = [s.players[0].race, s.players[1].race] as const;
+  // Same race: one row per type, both players side by side. Different races: one block per player, one below
+  // the other, each listing that player's race (the other column stays empty).
+  const entityRows =
+    races[0] === races[1]
+      ? raceTypes(races[0]).filter((e) => e.type !== "base").map((e) => row(`${e.label}s`, (p) => count(p, e.type))).join("")
+      : ([1, 2] as const)
+          .map((owner) => {
+            const head = `<tr class="race-head"><td colspan="3"><span class="dot p${owner}"></span> ${title(races[owner - 1])}</td></tr>`;
+            const lines = raceTypes(races[owner - 1])
+              .map((e) => row(`${e.label}s`, (p) => (p === owner ? count(p, e.type) : "")))
+              .join("");
+            return head + lines;
+          })
+          .join("");
   $("stats").innerHTML = `
     <table class="stats-table">
       <thead><tr><th></th>
@@ -474,7 +522,7 @@ function renderStats(s: GameState): void {
         ${row("Crystal", (p) => s.players[p - 1]!.crystal)}
         ${row("Bases", (p) => s.bases.filter((b) => b.owner === p && b.hp > 0).length)}
         ${row("Base HP", (p) => s.bases.reduce((hp, b) => hp + (b.owner === p ? Math.max(0, b.hp) : 0), 0))}
-        ${[...UNIT_TYPES, ...STRUCTURE_TYPES].map((t) => row(`${title(t)}s`, (p) => count(p, t))).join("")}
+        ${entityRows}
         ${row("Upgrades", ups)}
       </tbody>
     </table>`;
@@ -665,11 +713,13 @@ $("board").addEventListener("mousemove", (e) => {
   const parts = [`(${p.x}, ${p.y})`];
   const at = (o: { x: number; y: number }) => o.x === p.x && o.y === p.y;
   for (const n of s.nodes.filter(at)) parts.push(`${n.type} node #${n.id}: ${n.amount}`);
-  for (const b of s.bases.filter((b) => b.hp > 0 && at(b))) parts.push(`P${b.owner} base #${b.id}: ${b.hp} HP`);
-  for (const x of s.structures.filter(at)) parts.push(`P${x.owner} ${x.upgraded ? "upgraded " : ""}${x.type} #${x.id}: ${x.hp} HP`);
+  const baseName = (owner: 1 | 2) => (s.players[owner - 1]!.race === "tumor" ? "tumor cell" : "base");
+  const ups = (e: { upgrades: readonly string[] }) => (e.upgrades.length ? ` [${e.upgrades.join(", ")}]` : "");
+  for (const b of s.bases.filter((b) => b.hp > 0 && at(b))) parts.push(`P${b.owner} ${baseName(b.owner)} #${b.id}: ${b.hp} HP`);
+  for (const x of s.structures.filter(at)) parts.push(`P${x.owner} ${x.type}${ups(x)} #${x.id}: ${x.hp} HP`);
   for (const u of s.units.filter(at)) {
     const cargo = u.cargo.energy || u.cargo.crystal ? ` cargo ${u.cargo.energy}E ${u.cargo.crystal}C` : "";
-    parts.push(`P${u.owner} ${u.upgraded ? "upgraded " : ""}${u.type} #${u.id}: ${u.hp} HP${cargo}`);
+    parts.push(`P${u.owner} ${u.type}${ups(u)} #${u.id}: ${u.hp} HP${cargo}`);
   }
   if (s.map.tiles[p.y * s.map.size + p.x] === "#") parts.push("wall");
   info.textContent = parts.join(" · ");

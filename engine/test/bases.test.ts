@@ -7,7 +7,7 @@ import type { Base, GameState, PlayerId } from "../src/types.js";
 import { canAfford, enemyBasePos, freeNeighbors, pathTo } from "../../bots/lib/helpers.js";
 import { addNode, addUnit, testState, unit } from "./util.js";
 
-function addBase(s: GameState, owner: PlayerId, x: number, y: number, hp: number = CONFIG.base.hp): Base {
+function addBase(s: GameState, owner: PlayerId, x: number, y: number, hp: number = CONFIG.races.classic.base.hp): Base {
   const base = { id: s.nextId++, owner, x, y, hp };
   s.bases.push(base);
   return base;
@@ -285,7 +285,7 @@ describe("additional bases", () => {
   it("surviving turrets keep firing after their supporting base is destroyed", () => {
     const s = testState();
     const base = addBase(s, 1, 20, 20, 6);
-    s.structures.push({ upgraded: false, id: s.nextId++, owner: 1, type: "turret", x: 19, y: 20, hp: 50 });
+    s.structures.push({ upgrades: [], id: s.nextId++, owner: 1, type: "turret", x: 19, y: 20, hp: 50 });
     const enemy = addUnit(s, 2, "fighter", 21, 20);
     const dead = step(s, [], [{ type: "attack", unitId: enemy.id, targetId: base.id }]).state;
     const next = step(dead, [], []).state;
@@ -329,8 +329,8 @@ describe("additional bases", () => {
 
   it("replay verification reproduces base construction and selected-base spawning", () => {
     const { startEnergy, startCrystal } = CONFIG.match;
-    CONFIG.match.startEnergy = CONFIG.base.costEnergy + CONFIG.units.worker.costEnergy;
-    CONFIG.match.startCrystal = CONFIG.base.costCrystal;
+    CONFIG.match.startEnergy = CONFIG.races.classic.base.costEnergy + CONFIG.units.worker.costEnergy;
+    CONFIG.match.startCrystal = CONFIG.races.classic.base.costCrystal;
     try {
     let s = createInitialState(42);
     const recorder = new ReplayRecorder(42, ["builder", "idle"], s);

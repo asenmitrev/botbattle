@@ -1,6 +1,6 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { CONFIG, type BotController, type BotState, type BotTurn } from "@arena/engine";
+import { CONFIG, parseRaceExport, type BotController, type BotState, type BotTurn } from "@arena/engine";
 
 type OnTick = (state: BotState, memory: Record<string, unknown>) => unknown;
 
@@ -12,12 +12,15 @@ type OnTick = (state: BotState, memory: Record<string, unknown>) => unknown;
 export async function loadLocalBot(file: string, instance: string): Promise<BotController> {
   const abs = path.resolve(file);
   const url = pathToFileURL(abs).href + `?instance=${encodeURIComponent(instance)}`;
-  const mod = (await import(url)) as { onTick?: OnTick; default?: { onTick?: OnTick } };
+  const mod = (await import(url)) as { onTick?: OnTick; race?: unknown; default?: { onTick?: OnTick; race?: unknown } };
   const onTick = mod.onTick ?? mod.default?.onTick;
   if (typeof onTick !== "function") throw new Error(`${file} does not export onTick(state, memory)`);
+  const race = parseRaceExport(mod.race ?? mod.default?.race);
+  if ("error" in race) throw new Error(`${file}: ${race.error}`);
   let memory: Record<string, unknown> = {};
   return {
     name: path.basename(file).replace(/\.[cm]?js$/, ""),
+    race: race.race,
     turn(view: BotState): BotTurn {
       const working = JSON.parse(JSON.stringify(memory)) as Record<string, unknown>;
       let actions: unknown;

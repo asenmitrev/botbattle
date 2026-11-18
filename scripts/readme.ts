@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG, CONFIG_VERSION, STRUCTURE_TYPES, UNIT_TYPES, UPGRADE_TYPES, NODE_TYPES, type UpgradeEffect } from "../engine/src/index.js";
+import { CONFIG, CONFIG_VERSION, RACES, STRUCTURE_TYPES, UNIT_TYPES, UPGRADE_TYPES, NODE_TYPES, type Race, type UpgradeEffect, type UpgradeType } from "../engine/src/index.js";
 import { ECON } from "../server/src/economy.js";
 import { ELO } from "../server/src/elo.js";
 import { MAX_CODE_BYTES } from "../server/src/ladder.js";
@@ -36,30 +36,46 @@ function evaluate(expr: string): string {
   throw new Error(`README marker <!--v ${expr}--> is ${String(v)}, not a number or string`);
 }
 
-const title = (t: string) => t[0]!.toUpperCase() + t.slice(1);
+/** "immuneCell" → "Immune Cell". */
+const title = (t: string) => t[0]!.toUpperCase() + t.slice(1).replace(/([A-Z])/g, " $1");
+/** The race that lists a unit, structure or upgrade. */
+const raceOf = (list: "units" | "structures" | "upgrades", t: string): string =>
+  title(RACES.find((r) => (CONFIG.races[r][list] as readonly string[]).includes(t)) ?? "–");
+const baseName = (r: Race) => (r === "tumor" ? "Tumor Cell" : "Base");
 const cost = (c: { costEnergy: number; costCrystal: number }) =>
   [c.costEnergy ? `${c.costEnergy} E` : "", c.costCrystal ? `${c.costCrystal} C` : ""].filter(Boolean).join(" + ") || "free";
 const row = (cells: (string | number)[]) => `| ${cells.join(" | ")} |`;
 
-function effectText(type: string, e: UpgradeEffect): string {
-  const base = (UNIT_TYPES as readonly string[]).includes(type)
-    ? CONFIG.units[type as keyof typeof CONFIG.units]
-    : CONFIG.structures[type as keyof typeof CONFIG.structures];
+function effectText(name: UpgradeType): string {
+  const entry = CONFIG.upgrades[name];
+  const e: UpgradeEffect = entry;
+  const type = entry.appliesTo;
   const parts: string[] = [];
-  if (e.speedMultiplier) parts.push(`speed ${(base as { speed: number }).speed} → ${(base as { speed: number }).speed * e.speedMultiplier}`);
-  if (e.hpMultiplier) parts.push(`max HP ${base.hp} → ${base.hp * e.hpMultiplier}`);
-  if (e.turretImmune) parts.push("immune to turrets: they never target it and shoot other units instead");
+  if (type) {
+    const base = (UNIT_TYPES as readonly string[]).includes(type)
+      ? CONFIG.units[type as keyof typeof CONFIG.units]
+      : CONFIG.structures[type as keyof typeof CONFIG.structures];
+    const unit = base as { speed: number; range: number };
+    if (e.speedMultiplier) parts.push(`${title(type)} speed ${unit.speed} → ${unit.speed * e.speedMultiplier}`);
+    if (e.hpMultiplier) parts.push(`${title(type)} max HP ${base.hp} → ${base.hp * e.hpMultiplier}`);
+    if (e.turretImmune) parts.push(`${title(type)}s are immune to all building attacks: turrets and Tumor Cells never target them and shoot other units instead`);
+    if (e.rangeBonus) parts.push(`${title(type)} attack range ${unit.range} → ${unit.range + e.rangeBonus}`);
+    if (e.unleashed) parts.push(`${title(type)}s lose their leash and can move anywhere`);
+  }
+  if (e.buildRangeMultiplier) parts.push(`structure placement range ×${e.buildRangeMultiplier} (${CONFIG.structures.purificationCell.maxDistFromBase} → ${CONFIG.structures.purificationCell.maxDistFromBase * e.buildRangeMultiplier} for Tumor structures)`);
+  if (e.energyPerTick) parts.push(`+${e.energyPerTick} energy per tick, banked directly`);
   return parts.join("; ");
 }
 
 const TABLES: Record<string, () => string[]> = {
   units: () => [
-    row(["Unit", "Cost", "HP", "Speed", "Vision", "Attack", "Carry", "Harvest", "Builds"]),
-    row(Array(9).fill("---")),
+    row(["Unit", "Race", "Cost", "HP", "Speed", "Vision", "Attack", "Carry", "Harvest", "Builds"]),
+    row(Array(10).fill("---")),
     ...UNIT_TYPES.map((t) => {
       const u = CONFIG.units[t];
       return row([
         title(t),
+        raceOf("units", t),
         cost(u),
         u.hp,
         u.speed,
@@ -67,30 +83,47 @@ const TABLES: Record<string, () => string[]> = {
         u.damage ? `${u.damage} dmg, range ${u.range}` : "–",
         u.carry || "–",
         u.harvest ? `${u.harvest}/tick` : "–",
-        u.canBuild ? "yes" : "–",
+        [u.canBuild ? "yes" : "", u.canTransform ? `transforms into a ${baseName("tumor")}` : ""].filter(Boolean).join("; ") || "–",
       ]);
     }),
   ],
   structures: () => [
-    row(["Structure", "Cost", "HP", "Vision", "Attack", "Placement"]),
-    row(Array(6).fill("---")),
+    row(["Structure", "Race", "Cost", "HP", "Vision", "Effect", "Placement"]),
+    row(Array(7).fill("---")),
     ...STRUCTURE_TYPES.map((t) => {
       const s = CONFIG.structures[t];
+      const effect = s.heal
+        ? `heals friendly units and buildings in range ${s.range} by ${s.heal} HP/tick`
+        : s.damage
+          ? `${s.damage} dmg, range ${s.range} (automatic, ${s.targets === "buildings" ? "structures and bases only" : "units only"})`
+          : "–";
       return row([
         title(t),
+        raceOf("structures", t),
         cost(s),
         s.hp,
         s.vision || "–",
-        s.damage ? `${s.damage} dmg, range ${s.range} (automatic)` : "–",
+        effect,
         Number.isFinite(s.maxDistFromBase) ? `within ${s.maxDistFromBase} of a living friendly base` : "anywhere",
       ]);
     }),
-    row(["Base", cost(CONFIG.base), CONFIG.base.hp, CONFIG.base.vision, "–", "anywhere"]),
+    ...RACES.map((r) => {
+      const b = CONFIG.races[r].base;
+      return row([
+        r === "classic" ? "Base" : `${baseName(r)} (base)`,
+        title(r),
+        cost(b),
+        b.hp,
+        b.vision,
+        b.damage ? `${b.damage} dmg, range ${b.range} (automatic, units only)` : "–",
+        CONFIG.races[r].buildBase ? "anywhere (built by a worker)" : "anywhere (a Stem Cell transforms)",
+      ]);
+    }),
   ],
   upgrades: () => [
-    row(["Upgrade", "Cost", "Effect"]),
-    row(["---", "---", "---"]),
-    ...UPGRADE_TYPES.map((t) => row([title(t), cost(CONFIG.upgrades[t]), effectText(t, CONFIG.upgrades[t])])),
+    row(["Upgrade", "`upgrade`", "Race", "Cost", "Effect"]),
+    row(["---", "---", "---", "---", "---"]),
+    ...UPGRADE_TYPES.map((t) => row([title(t), `\`"${t}"\``, raceOf("upgrades", t), cost(CONFIG.upgrades[t]), effectText(t)])),
   ],
   nodes: () => [
     row(["Node", "Amount", "Regeneration"]),

@@ -9,13 +9,24 @@ export const COSTS = {
   turret: { energy: 100, crystal: 0 },
   wall: { energy: 3, crystal: 0 },
   base: { energy: 100, crystal: 50 },
+  // Tumor race
+  stemCell: { energy: 25, crystal: 0 },
+  immuneCell: { energy: 0, crystal: 20 },
+  purificationCell: { energy: 50, crystal: 0 },
+  siegeCell: { energy: 150, crystal: 0 },
+  /** What a Stem Cell's `transform` costs. */
+  tumorCell: { energy: 50, crystal: 0 },
 };
 
-/** Upgrade costs, keyed by the type being upgraded (bought once, covers every unit/wall of that type). */
+/** Upgrade costs, by upgrade name (bought once; only your race's upgrades can be bought). */
 export const UPGRADE_COSTS = {
   scout: { energy: 0, crystal: 15 },
   wall: { energy: 50, crystal: 0 },
   fighter: { energy: 0, crystal: 20 },
+  tumorSpeed: { energy: 0, crystal: 15 },
+  photosynthesis: { energy: 0, crystal: 20 },
+  freedom: { energy: 0, crystal: 15 },
+  toxic: { energy: 0, crystal: 20 },
 };
 
 /** Chebyshev distance — the metric used for all action ranges (adjacent = 1). */

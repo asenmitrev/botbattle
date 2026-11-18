@@ -35,7 +35,7 @@ export class ReplayModel {
     if (replay.configVersion !== CONFIG_VERSION) {
       throw new Error(`Replay was recorded under rules ${replay.configVersion}; this viewer plays ${CONFIG_VERSION}, so it can't be shown.`);
     }
-    let s = createInitialState(replay.seed);
+    let s = createInitialState(replay.seed, replay.races);
     this.states.push(s);
     for (const rec of replay.ticks) {
       s = step(s, rec.actions[0], rec.actions[1]).state;

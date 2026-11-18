@@ -8,7 +8,7 @@ This file is the whole manual and the only rules document. It is self-contained:
 and ask for a bot. Every number in it comes from `engine/src/config.ts` (or, for the ladder, the server's
 constants) and is checked by a test.
 
-**Rules version <!--v CONFIG_VERSION-->3.1.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
+**Rules version <!--v CONFIG_VERSION-->4.2.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
 
 ## Writing a bot
 
@@ -21,6 +21,8 @@ export function onTick(state, memory) {
 ```
 
 - It is called once per tick with a fog-filtered `state` (see [Bot API](#bot-api)).
+- **Race**: a bot plays the classic race unless it also exports `export const race = "tumor";` (see
+  [Races](#races)). Any other value fails the bot at load.
 - `memory` is a plain object that persists between ticks. Mutate it in place. It must be JSON-serializable.
   Module-level variables survive between ticks but are lost when the sandbox restarts, so keep anything
   important in `memory`.
@@ -105,7 +107,8 @@ The simulation is deterministic: the same seed and the same bot actions always p
 ### Match
 
 - Ticks are numbered 0–<!--v match.maxTicks - 1-->499<!--/v--> (<!--v match.maxTicks-->500<!--/v--> ticks at most).
-- Each player starts with one base, <!--v match.startEnergy-->150<!--/v--> energy, <!--v match.startCrystal-->0<!--/v--> crystal and <!--v match.startWorkers-->2<!--/v--> workers next to the base.
+- Each player starts with one base of their race, <!--v match.startEnergy-->150<!--/v--> energy, <!--v match.startCrystal-->0<!--/v--> crystal and <!--v match.startWorkers-->2<!--/v--> workers of their race
+  (classic: Workers; Tumor: Stem Cells) next to the base.
 - **Unit cap**: <!--v match.unitCap-->40<!--/v--> units per player (structures and bases don't count).
 - **Win**: destroy all enemy bases (the match ends that tick). Losing one base isn't defeat while another
   friendly base survives. If both players lose their last base on the same tick, or the last tick resolves with
@@ -113,9 +116,47 @@ The simulation is deterministic: the same seed and the same bot actions always p
   and bases don't count). Equal unit counts fall back to the **higher score**; an equal score is a **draw**.
 - **Score** (the tiebreak, and the ladder's high score) =
   <!--v score.energyWeight-->1<!--/v--> × banked energy + <!--v score.crystalWeight-->3<!--/v--> × banked crystal + <!--v score.unitValueWeight-->1<!--/v--> × value of living units + <!--v score.baseHpWeight-->2<!--/v--> × total HP of surviving friendly bases.
-  A unit's value is its spawn cost with the same resource weights (worker <!--v units.worker.costEnergy * score.energyWeight + units.worker.costCrystal * score.crystalWeight-->50<!--/v-->, fighter <!--v units.fighter.costEnergy * score.energyWeight + units.fighter.costCrystal * score.crystalWeight-->105<!--/v-->, scout <!--v units.scout.costEnergy * score.energyWeight + units.scout.costCrystal * score.crystalWeight-->30<!--/v-->).
+  A unit's value is its spawn cost with the same resource weights (worker <!--v units.worker.costEnergy * score.energyWeight + units.worker.costCrystal * score.crystalWeight-->50<!--/v-->, fighter <!--v units.fighter.costEnergy * score.energyWeight + units.fighter.costCrystal * score.crystalWeight-->105<!--/v-->, scout <!--v units.scout.costEnergy * score.energyWeight + units.scout.costCrystal * score.crystalWeight-->30<!--/v-->,
+  Stem Cell <!--v units.stemCell.costEnergy * score.energyWeight + units.stemCell.costCrystal * score.crystalWeight-->25<!--/v-->, Immune Cell <!--v units.immuneCell.costEnergy * score.energyWeight + units.immuneCell.costCrystal * score.crystalWeight-->60<!--/v-->).
   Cargo that hasn't been deposited and structures don't count.
 - **Forfeit**: a bot that fails <!--v bot.maxConsecutiveFailures-->10<!--/v--> ticks in a row loses.
+
+### Races
+
+Each player has a race, fixed for the match. It decides the player's base, and which units, structures and
+upgrades they can use. A spawn, build or upgrade of another race's type fails with an `invalid_action`.
+
+| Race | Base | Worker | Units | Structures | Upgrades |
+| --- | --- | --- | --- | --- | --- |
+| `"classic"` (default) | Base | Worker | <!--v races.classic.units-->worker, fighter, scout<!--/v--> | <!--v races.classic.structures-->turret, wall<!--/v--> | <!--v races.classic.upgrades-->scout, wall, fighter<!--/v--> |
+| `"tumor"` | Tumor Cell | Stem Cell | <!--v races.tumor.units-->stemCell, immuneCell<!--/v--> | <!--v races.tumor.structures-->purificationCell, siegeCell<!--/v--> | <!--v races.tumor.upgrades-->tumorSpeed, photosynthesis, freedom, toxic<!--/v--> |
+
+Stats are in the [Units](#units), [Structures](#structures) and [Upgrades](#upgrades) tables. The Tumor race
+differs from the classic one in these ways:
+
+- **Tumor Cells are its bases.** Everything that applies to bases applies to them: deposits, spawning, the win
+  condition, score (<!--v score.baseHpWeight-->2<!--/v--> × HP) and zone immunity. The starting Tumor Cell has
+  <!--v races.tumor.base.hp-->50<!--/v--> HP like every other. A Tumor Cell shoots the lowest-HP enemy unit within
+  <!--v races.tumor.base.range-->3<!--/v--> for <!--v races.tumor.base.damage-->1<!--/v--> damage every tick. Like a turret,
+  it never targets upgraded fighters.
+- **New Tumor Cells come from Stem Cells.** `{ type: "transform", unitId }` turns a Stem Cell into a Tumor Cell
+  on its own tile, anywhere on the map, for <!--v races.tumor.base.costEnergy-->50<!--/v--> E. The Stem Cell is
+  gone (with any cargo it carried) and isn't counted as a death. It happens in the build phase, is paid with
+  builds in unit-ID order, and the new Tumor Cell spawns and accepts deposits from the next tick. Stem Cells
+  can't `build` a base.
+- **Placement**: Purification and Siege Cells go within <!--v structures.purificationCell.maxDistFromBase-->8<!--/v--> of
+  a living Tumor Cell, or <!--v structures.purificationCell.maxDistFromBase * upgrades.tumorSpeed.buildRangeMultiplier-->16<!--/v-->
+  with Tumor Speed.
+- **Leash**: an Immune Cell can't step to a tile more than <!--v units.immuneCell.leash-->16<!--/v--> from its nearest
+  living Tumor Cell, unless that step brings it no farther from one (so a cell stranded by a lost Tumor Cell
+  can still walk home). A blocked step just doesn't happen, like a step into a wall; `moveTo` paths ignore
+  the leash. Adaptation Freedom removes it.
+- **Healing**: after combat, each Purification Cell restores <!--v structures.purificationCell.heal-->1<!--/v--> HP to every
+  friendly unit, structure and Tumor Cell within <!--v structures.purificationCell.range-->3<!--/v--> (itself included), up to
+  max HP. Cells heal separately, so two in range heal twice as fast. Each heal is a `heal` event.
+- **Siege Cells** shoot the lowest-HP enemy structure or base within <!--v structures.siegeCell.range-->6<!--/v--> (ties →
+  lowest ID). They never shoot units.
+- **Photosynthesis** adds <!--v upgrades.photosynthesis.energyPerTick-->3<!--/v--> energy to the bank every tick, with no worker.
 
 ### Resources
 
@@ -136,11 +177,13 @@ The simulation is deterministic: the same seed and the same bot actions always p
 ### Units
 
 <!--table units-->
-| Unit | Cost | HP | Speed | Vision | Attack | Carry | Harvest | Builds |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Worker | 50 E | 10 | 1 | 5 | – | 20 | 5/tick | yes |
-| Fighter | 60 E + 15 C | 30 | 1 | 5 | 6 dmg, range 1 | – | – | – |
-| Scout | 30 E | 5 | 2 | 9 | 1 dmg, range 1 | – | – | – |
+| Unit | Race | Cost | HP | Speed | Vision | Attack | Carry | Harvest | Builds |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Worker | Classic | 50 E | 10 | 1 | 5 | – | 20 | 5/tick | yes |
+| Fighter | Classic | 60 E + 15 C | 30 | 1 | 5 | 6 dmg, range 1 | – | – | – |
+| Scout | Classic | 30 E | 5 | 2 | 9 | 1 dmg, range 1 | – | – | – |
+| Stem Cell | Tumor | 25 E | 5 | 1 | 5 | – | 10 | 5/tick | yes; transforms into a Tumor Cell |
+| Immune Cell | Tumor | 20 C | 20 | 2 | 5 | 3 dmg, range 1 | – | – | – |
 <!--/table-->
 
 E = energy, C = crystal. A spawn or build needs the full cost in both resources.
@@ -155,22 +198,26 @@ E = energy, C = crystal. A spawn or build needs the full cost in both resources.
 ### Structures
 
 <!--table structures-->
-| Structure | Cost | HP | Vision | Attack | Placement |
-| --- | --- | --- | --- | --- | --- |
-| Turret | 100 E | 50 | 4 | 4 dmg, range 4 (automatic) | within 8 of a living friendly base |
-| Wall | 3 E | 60 | – | – | anywhere |
-| Base | 100 E + 50 C | 200 | 7 | – | anywhere |
+| Structure | Race | Cost | HP | Vision | Effect | Placement |
+| --- | --- | --- | --- | --- | --- | --- |
+| Turret | Classic | 100 E | 50 | 4 | 4 dmg, range 4 (automatic, units only) | within 8 of a living friendly base |
+| Wall | Classic | 3 E | 60 | – | – | anywhere |
+| Purification Cell | Tumor | 50 E | 100 | 10 | heals friendly units and buildings in range 3 by 1 HP/tick | within 8 of a living friendly base |
+| Siege Cell | Tumor | 150 E | 100 | 16 | 1 dmg, range 6 (automatic, structures and bases only) | within 8 of a living friendly base |
+| Base | Classic | 100 E + 50 C | 200 | 7 | – | anywhere (built by a worker) |
+| Tumor Cell (base) | Tumor | 50 E | 50 | 10 | 1 dmg, range 3 (automatic, units only) | anywhere (a Stem Cell transforms) |
 <!--/table-->
 
-A worker builds on an empty floor tile adjacent to it. Building is instant and paid from banked resources.
+A worker (Worker or Stem Cell) builds a structure of its race on an empty floor tile adjacent to it. Building
+is instant and paid from banked resources.
 
 - The tile must be empty *after movement* this tick: no unit, structure, base or node.
 - If both players build on the same tile in the same tick, both builds fail. If two of your own workers pick the
   same tile, the lower unit ID builds.
 - Builds are paid in unit-ID order, so if resources run out the later builds fail. Nothing is deducted for a
   failed build.
-- The turret distance limit counts from **any living friendly base** that existed before this tick's build
-  phase. Existing turrets keep working if a nearby base is destroyed.
+- A distance limit (turrets, Purification and Siege Cells) counts from **any living friendly base** that existed
+  before this tick's build phase. Existing structures keep working if a nearby base is destroyed.
 - Walls block movement. Turrets shoot automatically (see [Combat](#combat)).
 - **Bases**: workers deposit at any living friendly base, spawns come from them, and they extend turret
   placement. Bases can't move and are never hurt by the zone. A new base can be attacked on the tick it is
@@ -181,23 +228,28 @@ A worker builds on an empty floor tile adjacent to it. Building is instant and p
 ### Upgrades
 
 <!--table upgrades-->
-| Upgrade | Cost | Effect |
-| --- | --- | --- |
-| Scout | 15 C | speed 2 → 4; max HP 5 → 10 |
-| Wall | 50 E | max HP 60 → 120 |
-| Fighter | 20 C | immune to turrets: they never target it and shoot other units instead |
+| Upgrade | `upgrade` | Race | Cost | Effect |
+| --- | --- | --- | --- | --- |
+| Scout | `"scout"` | Classic | 15 C | Scout speed 2 → 4; Scout max HP 5 → 10 |
+| Wall | `"wall"` | Classic | 50 E | Wall max HP 60 → 120 |
+| Fighter | `"fighter"` | Classic | 20 C | Fighters are immune to all building attacks: turrets and Tumor Cells never target them and shoot other units instead |
+| Tumor Speed | `"tumorSpeed"` | Tumor | 15 C | structure placement range ×2 (8 → 16 for Tumor structures) |
+| Photosynthesis | `"photosynthesis"` | Tumor | 20 C | +3 energy per tick, banked directly |
+| Freedom | `"freedom"` | Tumor | 15 C | Immune Cells lose their leash and can move anywhere |
+| Toxic | `"toxic"` | Tumor | 20 C | Immune Cell attack range 1 → 2 |
 <!--/table-->
 
-An upgrade is bought once per type with `{ type: "upgrade", upgrade: "scout" }` (or `"wall"`, `"fighter"`) and
-applies to **all** your entities of that type: every one you have now and every one you spawn or build later
-(which start upgraded, at full upgraded HP). It takes effect on the tick it is bought, has no range
-requirement, and can be bought before you own any of that type. `myUpgrades` shows which you own and each
-entity carries `upgraded: true`.
+An upgrade is bought once with `{ type: "upgrade", upgrade: "scout" }`, using the name in the `upgrade` column.
+One that targets a type applies to **all** your entities of that type: every one you have now and every one
+you spawn or build later (which start upgraded, at full upgraded HP). The others (Tumor Speed, Photosynthesis)
+change the player. An upgrade takes effect on the tick it is bought, has no range requirement, and can be
+bought before you own any of its type. `myUpgrades` shows your race's upgrades and which you own; each entity
+lists its upgrades in `upgrades` (and `upgraded: true` if there are any). Immune Cells can have both of theirs.
 
 - When max HP rises, current HP rises by the same amount (a wall at 10/60 becomes 70/120).
 - Types not in the table have no upgrade.
-- An upgrade fails with an `invalid_action` (and costs nothing) if the type is unknown or already bought, is
-  listed twice in the same tick, or you can't cover the cost.
+- An upgrade fails with an `invalid_action` (and costs nothing) if the name is unknown, belongs to another race
+  or is already bought, is listed twice in the same tick, or you can't cover the cost.
 - Several upgrades per tick are allowed and are paid in action order.
 - An upgraded fighter still takes full damage from enemy units and the zone.
 
@@ -205,8 +257,13 @@ entity carries `upgraded: true`.
 
 - Units with an attack `attack` one enemy unit, structure or base within their range. They can't attack their
   own side.
-- Turrets fire automatically at the lowest-HP enemy **unit** in range (ties → lowest ID), skipping units
-  immune to turrets. They never shoot structures or bases.
+- Unit range is the table's range plus upgrades (an Immune Cell with Adaptation Toxic has range
+  <!--v units.immuneCell.range + upgrades.toxic.rangeBonus-->2<!--/v-->). `myUnits[].range` shows it.
+- Turrets fire automatically at the lowest-HP enemy **unit** in range (ties → lowest ID), skipping upgraded
+  fighters. They never shoot structures or bases.
+- Siege Cells fire automatically at the lowest-HP enemy structure or base in range; Tumor Cells at the
+  lowest-HP enemy unit in range, skipping upgraded fighters (see [Races](#races)). An upgraded fighter therefore
+  takes no damage from any building, only from units and the zone.
 - All damage is computed from the **pre-combat** state and applied **simultaneously**, so two units can kill
   each other in the same tick.
 
@@ -220,8 +277,8 @@ entity carries `upgraded: true`.
 
 ### Fog of war
 
-- Each player sees every tile within the vision circle of each of their living bases, units and turrets (vision
-  radii are in the tables above). There is no line of sight.
+- Each player sees every tile within the vision circle of each of their living bases, units and structures
+  (vision radii are in the tables above). There is no line of sight.
 - Bots see enemy units, enemy structures, living enemy bases and nodes (with amounts) only on visible tiles.
 - `moveTo` pathfinding avoids terrain, bases, your structures and the enemy structures you can currently see.
 
@@ -235,7 +292,8 @@ The engine runs `step(state, actionsP1, actionsP2) → { state, events }`:
 2. **Upgrades, then spawns.** Player 1, then player 2. Their resources are independent, so the order can't matter.
 3. **Movement**, resolved simultaneously in sub-steps. In sub-step *k*, every unit with speed ≥ *k* that has a
    `move`/`moveTo` attempts one step (`moveTo` recomputes its direction each sub-step).
-   - A step into a terrain wall, node, base, structure or off the map fails.
+   - A step into a terrain wall, node, base, structure or off the map fails, and so does a leashed unit's step
+     past its leash (see [Races](#races)).
    - If 2+ units target the same tile, none of them move.
    - A unit may step into a tile whose occupant moves away successfully in the same sub-step (chains work).
    - Cycles of any length, including 2-unit swaps, are blocked: none of their units move.
@@ -243,12 +301,14 @@ The engine runs `step(state, actionsP1, actionsP2) → { state, events }`:
      use the order N, E, S, W for player 1 and S, W, N, E for player 2 (mirrored). If the target tile is
      blocked, the unit paths to a tile next to it and stops there. An unreachable target gives an
      `invalid_action` ("no path to target").
-4. **Harvest, then deposit, then build.** Deposits happen before builds, so resources deposited this tick can
-   pay for a build this tick.
-5. **Combat**: unit attacks, then turret target selection. All damage is applied at once.
+4. **Harvest, then deposit, then build** (and `transform`). Deposits happen before builds, so resources
+   deposited this tick can pay for a build this tick.
+5. **Combat**: unit attacks, then automatic attacks (turrets, Siege Cells, then Tumor Cells). All damage is
+   applied at once.
 6. **Remove dead** units and structures (HP ≤ 0) and deactivate destroyed bases. If a player has no living
    base the match ends now and phase 7 is skipped.
-7. **Node regeneration**, then **zone damage**, then remove anything the zone killed.
+7. **Node regeneration**, then Photosynthesis income, then **healing** (Purification Cells, in ID order), then
+   **zone damage**, then remove anything the zone killed.
 8. **Vision** is derived from the new state for the next tick's bot views. After the last tick the match ends
    on living unit counts, then score.
 
@@ -270,14 +330,15 @@ version it was recorded with.
 {
   tick: number;                     // 0 .. maxTicks-1
   player: 1 | 2;
+  race: "classic" | "tumor";        // your race (your `race` export)
   myBase: { id, x, y, hp };         // the oldest living friendly base (the destroyed starting base, 0 HP, once all are gone)
   myBases: [{ id, x, y, hp }];      // all living friendly bases, ascending ID
   startingBase: { x, y };           // original position, even after destruction
-  myUnits: [{ id, type: "worker"|"fighter"|"scout", x, y, hp, maxHp,
-              cargo: { energy, crystal }, cargoCapacity, upgraded }];
-  myStructures: [{ id, type: "turret"|"wall", x, y, hp, maxHp, upgraded }];  // bases are not here
+  myUnits: [{ id, type, x, y, hp, maxHp, cargo: { energy, crystal }, cargoCapacity,
+              range, leash, upgraded, upgrades }];  // range after upgrades; leash: null when unleashed
+  myStructures: [{ id, type, x, y, hp, maxHp, upgraded, upgrades }];  // bases (and Tumor Cells) are not here
   energy: number; crystal: number;  // banked
-  myUpgrades: { scout, fighter, wall };  // booleans: which upgrades you have bought
+  myUpgrades: { scout, fighter, wall };  // your race's upgrades → whether you have bought each
   visibleEnemies: [{ id, kind: "unit"|"structure"|"base", type, x, y, hp, upgraded }];  // no `upgraded` on bases
   visibleNodes: [{ id, type: "energy"|"crystal", x, y, amount }];
   visibleTiles: [{ x, y, type: "floor"|"wall"|"energy_node"|"crystal_node" }];
@@ -303,9 +364,10 @@ Each unit gets at most **one** action per tick; extras are invalid.
 | `{ type: "harvest", unitId, nodeId }` | A unit that can harvest, adjacent to a node, takes its harvest rate into cargo. |
 | `{ type: "deposit", unitId }` | A unit with cargo, adjacent to a living friendly base, banks all of it. |
 | `{ type: "attack", unitId, targetId }` | A unit with an attack hits an enemy unit, structure or base within range. |
-| `{ type: "build", unitId, structure: "turret"\|"wall"\|"base", x, y }` | A worker builds on an adjacent empty floor tile. |
-| `{ type: "spawn", unit: "worker"\|"fighter"\|"scout", baseId? }` | Spawn beside a living friendly base (one spawn per player per tick). |
-| `{ type: "upgrade", upgrade: "scout"\|"fighter"\|"wall" }` | Buy that type's upgrade. |
+| `{ type: "build", unitId, structure, x, y }` | A worker builds a structure of its race (classic: `"turret"`, `"wall"`, `"base"`; Tumor: `"purificationCell"`, `"siegeCell"`) on an adjacent empty floor tile. |
+| `{ type: "transform", unitId }` | A Stem Cell becomes a Tumor Cell on its own tile. |
+| `{ type: "spawn", unit, baseId? }` | Spawn a unit of your race beside a living friendly base (one spawn per player per tick). |
+| `{ type: "upgrade", upgrade }` | Buy one of your race's upgrades, by name. |
 | `{ type: "log", text }` | Message shown in the replay viewer. |
 | `{ type: "mark", x, y, color?, label? }` | Debug marker drawn in the replay viewer. |
 

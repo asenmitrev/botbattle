@@ -13,7 +13,7 @@
 //   3. If no damage to the victim was recorded that tick (shouldn't happen), the killer is "unknown".
 // Damage dealt on earlier ticks doesn't earn kill credit; it shows up in the damage totals.
 
-import { CONFIG, type BuildType, type NodeType, type StructureType, type UnitType, type UpgradeType } from "./config.js";
+import { CONFIG, type BuildType, type NodeType, type Race, type StructureType, type UnitType, type UpgradeType } from "./config.js";
 import type { Replay } from "./replay.js";
 import { createInitialState } from "./state.js";
 import { buildSpec, isUnitType } from "./stats.js";
@@ -21,8 +21,8 @@ import type { Cargo, GameEvent, GameState, PlayerId } from "./types.js";
 
 /** What can die: a unit, a structure or a base. */
 export type VictimType = UnitType | StructureType | "base";
-/** What can deal damage: a unit type, a structure type (turrets), or the shrinking zone. */
-export type DamageSource = UnitType | StructureType | "zone";
+/** What can deal damage: a unit type, a structure type (turrets), a base (the Tumor Cell), or the shrinking zone. */
+export type DamageSource = UnitType | StructureType | "base" | "zone";
 /** Who gets a kill: a damage source, or "unknown" when no damage to the victim was recorded that tick. */
 export type KillerType = DamageSource | "unknown";
 
@@ -129,10 +129,12 @@ export function matrixTotal(m: KillMatrix, victims?: readonly VictimType[]): num
  */
 export class MatchStatsTracker {
   private readonly entities = new Map<number, Entity>();
+  private readonly races: [Race, Race];
   private readonly alive: [Map<UnitType, number>, Map<UnitType, number>] = [new Map(), new Map()];
   private readonly s: MatchStats = { ticks: 0, firstContactTick: null, firstDeathTick: null, players: [emptyPlayer(), emptyPlayer()] };
 
   constructor(initial: GameState) {
+    this.races = [initial.players[0].race, initial.players[1].race];
     for (const u of initial.units) this.addUnit(u.id, u.owner, u.type);
     for (const st of initial.structures) this.entities.set(st.id, { owner: st.owner, type: st.type });
     for (const b of initial.bases) this.entities.set(b.id, { owner: b.owner, type: "base" });
@@ -168,7 +170,21 @@ export class MatchStatsTracker {
         case "build": {
           this.entities.set(e.structureId, { owner: e.player, type: e.structure });
           inc(pl(e.player).built, e.structure);
-          const c = buildSpec(e.structure);
+          const c = buildSpec(e.structure, this.races[e.player - 1]!);
+          this.spend(e.player, c.costEnergy, c.costCrystal);
+          break;
+        }
+        case "transform": {
+          // The unit leaves (not a death) and a base appears, paid like a build.
+          const unit = this.entities.get(e.unitId);
+          if (unit && isUnitType(unit.type)) {
+            const m = this.alive[e.player - 1]!;
+            m.set(unit.type, (m.get(unit.type) ?? 1) - 1);
+          }
+          this.entities.delete(e.unitId);
+          this.entities.set(e.baseId, { owner: e.player, type: "base" });
+          inc(pl(e.player).built, "base");
+          const c = buildSpec("base", this.races[e.player - 1]!);
           this.spend(e.player, c.costEnergy, c.costCrystal);
           break;
         }
@@ -188,7 +204,7 @@ export class MatchStatsTracker {
         case "attack": {
           const by = this.entities.get(e.attackerId);
           const victim = this.entities.get(e.targetId);
-          if (by && by.type !== "base") {
+          if (by) {
             const source = by.type;
             inc(pl(by.owner).damageDealt, source, e.damage);
             if (victim) {
@@ -264,7 +280,7 @@ export class MatchStatsTracker {
       }
     }
     const killer = killerId === null ? undefined : this.entities.get(killerId);
-    if (!killer || killer.type === "base") return void incMatrix(loser.losses, type, "unknown");
+    if (!killer) return void incMatrix(loser.losses, type, "unknown");
     incMatrix(loser.losses, type, killer.type);
     const winner = this.s.players[killer.owner - 1]!;
     incMatrix(winner.kills, type, killer.type);
@@ -288,7 +304,7 @@ export class MatchStatsTracker {
 
 /** Stats for a whole replay, or for its first `ticks` ticks. */
 export function matchStats(replay: Replay, ticks = replay.ticks.length): MatchStats {
-  const tracker = new MatchStatsTracker(replay.snapshots[0]?.state ?? createInitialState(replay.seed));
+  const tracker = new MatchStatsTracker(replay.snapshots[0]?.state ?? createInitialState(replay.seed, replay.races));
   for (const rec of replay.ticks.slice(0, ticks)) tracker.add(rec.tick, [...(rec.runnerEvents ?? []), ...rec.events]);
   return tracker.snapshot();
 }

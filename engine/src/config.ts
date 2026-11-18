@@ -2,7 +2,7 @@
 // (`pnpm readme`; a test fails while they are stale). Bump CONFIG_VERSION whenever any value below
 // or any rule in step.ts changes: replays record it and only replay under the same version.
 
-export const CONFIG_VERSION = "3.1.0";
+export const CONFIG_VERSION = "4.2.0";
 
 export const CONFIG = {
   map: {
@@ -38,17 +38,55 @@ export const CONFIG = {
     unitCap: 40,
   },
 
-  base: { costEnergy: 100, costCrystal: 50, hp: 200, vision: 7, maxDistFromBase: Infinity },
-
-  units: {
-    worker: { costEnergy: 50, costCrystal: 0, hp: 10, speed: 1, vision: 5, carry: 20, harvest: 5, damage: 0, range: 0, canBuild: true },
-    fighter: { costEnergy: 60, costCrystal: 15, hp: 30, speed: 1, vision: 5, carry: 0, harvest: 0, damage: 6, range: 1, canBuild: false },
-    scout: { costEnergy: 30, costCrystal: 0, hp: 5, speed: 2, vision: 9, carry: 0, harvest: 0, damage: 1, range: 1, canBuild: false },
+  /**
+   * Races. A bot picks one with `export const race = "tumor"` (default "classic"). Each race has its own
+   * base (the building that deposits, spawns and must survive), the units, structures and upgrades it may
+   * use, and its worker type (what each player starts with). `buildBase`: workers can `build` a base;
+   * otherwise a unit with `canTransform` turns itself into one with `transform`.
+   */
+  races: {
+    classic: {
+      base: { costEnergy: 100, costCrystal: 50, hp: 200, vision: 7, damage: 0, range: 0, maxDistFromBase: Infinity },
+      worker: "worker",
+      units: ["worker", "fighter", "scout"],
+      structures: ["turret", "wall"],
+      upgrades: ["scout", "wall", "fighter"],
+      buildBase: true,
+    },
+    tumor: {
+      /** The Tumor Cell. It shoots the lowest-HP enemy unit in range, like a turret (and skips upgraded fighters). */
+      base: { costEnergy: 50, costCrystal: 0, hp: 50, vision: 10, damage: 1, range: 3, maxDistFromBase: Infinity },
+      worker: "stemCell",
+      units: ["stemCell", "immuneCell"],
+      structures: ["purificationCell", "siegeCell"],
+      upgrades: ["tumorSpeed", "photosynthesis", "freedom", "toxic"],
+      buildBase: false,
+    },
   },
 
+  /**
+   * Every unit of every race. `leash`: the unit can't step farther than this (Chebyshev) from its nearest
+   * living friendly base, except to step back toward one. `canTransform`: `transform` turns the unit into a
+   * base of its race, on its own tile.
+   */
+  units: {
+    worker: { costEnergy: 50, costCrystal: 0, hp: 10, speed: 1, vision: 5, carry: 20, harvest: 5, damage: 0, range: 0, canBuild: true, canTransform: false, leash: Infinity },
+    fighter: { costEnergy: 60, costCrystal: 15, hp: 30, speed: 1, vision: 5, carry: 0, harvest: 0, damage: 6, range: 1, canBuild: false, canTransform: false, leash: Infinity },
+    scout: { costEnergy: 30, costCrystal: 0, hp: 5, speed: 2, vision: 9, carry: 0, harvest: 0, damage: 1, range: 1, canBuild: false, canTransform: false, leash: Infinity },
+    stemCell: { costEnergy: 25, costCrystal: 0, hp: 5, speed: 1, vision: 5, carry: 10, harvest: 5, damage: 0, range: 0, canBuild: true, canTransform: true, leash: Infinity },
+    immuneCell: { costEnergy: 0, costCrystal: 20, hp: 20, speed: 2, vision: 5, carry: 0, harvest: 0, damage: 3, range: 1, canBuild: false, canTransform: false, leash: 16 },
+  },
+
+  /**
+   * Every structure of every race. `targets`: what its automatic attack shoots ("units": the lowest-HP enemy
+   * unit; "buildings": the lowest-HP enemy structure or base). `heal`: HP restored per tick to every friendly
+   * unit, structure and base within `range`. `maxDistFromBase`: placement limit from a living friendly base.
+   */
   structures: {
-    turret: { costEnergy: 100, costCrystal: 0, hp: 50, damage: 4, range: 4, vision: 4, maxDistFromBase: 8 },
-    wall: { costEnergy: 3, costCrystal: 0, hp: 60, damage: 0, range: 0, vision: 0, maxDistFromBase: Infinity },
+    turret: { costEnergy: 100, costCrystal: 0, hp: 50, damage: 4, range: 4, vision: 4, maxDistFromBase: 8, targets: "units", heal: 0 },
+    wall: { costEnergy: 3, costCrystal: 0, hp: 60, damage: 0, range: 0, vision: 0, maxDistFromBase: Infinity, targets: "none", heal: 0 },
+    purificationCell: { costEnergy: 50, costCrystal: 0, hp: 100, damage: 0, range: 3, vision: 10, maxDistFromBase: 8, targets: "none", heal: 1 },
+    siegeCell: { costEnergy: 150, costCrystal: 0, hp: 100, damage: 1, range: 6, vision: 16, maxDistFromBase: 8, targets: "buildings", heal: 0 },
   },
 
   nodes: {
@@ -57,14 +95,19 @@ export const CONFIG = {
   },
 
   /**
-   * Per-type upgrades, keyed by the unit/structure type they apply to. Bought once per player; applies to
-   * all of that player's entities of the type, current and future. The effect fields are UpgradeEffect
-   * (below); rules read them only through stats.ts, so a new upgrade is a config entry, not a new `if`.
+   * Upgrades, by name. Bought once per player, and only by a player whose race lists it. One with
+   * `appliesTo` changes every one of the player's entities of that type, current and future; one without
+   * changes the player. The effect fields are UpgradeEffect (below); rules read them only through stats.ts,
+   * so a new upgrade is a config entry, not a new `if`.
    */
   upgrades: {
-    scout: { costEnergy: 0, costCrystal: 15, speedMultiplier: 2, hpMultiplier: 2 },
-    wall: { costEnergy: 50, costCrystal: 0, hpMultiplier: 2 },
-    fighter: { costEnergy: 0, costCrystal: 20, turretImmune: true },
+    scout: { appliesTo: "scout", costEnergy: 0, costCrystal: 15, speedMultiplier: 2, hpMultiplier: 2 },
+    wall: { appliesTo: "wall", costEnergy: 50, costCrystal: 0, hpMultiplier: 2 },
+    fighter: { appliesTo: "fighter", costEnergy: 0, costCrystal: 20, turretImmune: true },
+    tumorSpeed: { appliesTo: null, costEnergy: 0, costCrystal: 15, buildRangeMultiplier: 2 },
+    photosynthesis: { appliesTo: null, costEnergy: 0, costCrystal: 20, energyPerTick: 3 },
+    freedom: { appliesTo: "immuneCell", costEnergy: 0, costCrystal: 15, unleashed: true },
+    toxic: { appliesTo: "immuneCell", costEnergy: 0, costCrystal: 20, rangeBonus: 1 },
   },
 
   zone: {
@@ -116,9 +159,11 @@ export const CONFIG = {
 } as const;
 
 export type Config = typeof CONFIG;
+export type Race = keyof Config["races"];
 export type UnitType = keyof Config["units"];
 export type StructureType = keyof Config["structures"];
 export type BuildType = StructureType | "base";
+/** An upgrade's name (for the classic race, the type it upgrades). */
 export type UpgradeType = keyof Config["upgrades"];
 export type NodeType = keyof Config["nodes"];
 
@@ -128,18 +173,33 @@ export interface UpgradeEffect {
   speedMultiplier?: number;
   /** Multiplies max HP (current HP rises by the same amount when bought). */
   hpMultiplier?: number;
-  /** Turrets never target this unit. */
+  /** No building attacks it: turrets and Tumor Cells never target this unit (Siege Cells only shoot buildings). */
   turretImmune?: boolean;
+  /** Adds to the unit's attack range. */
+  rangeBonus?: number;
+  /** Removes the unit's leash. */
+  unleashed?: boolean;
+  /** Player upgrade: multiplies every structure's maxDistFromBase. */
+  buildRangeMultiplier?: number;
+  /** Player upgrade: energy added to the bank every tick. */
+  energyPerTick?: number;
 }
-// Compile-time check that every upgrade entry is a cost plus UpgradeEffect fields and nothing else.
+// Compile-time checks: every upgrade entry is a target and a cost plus UpgradeEffect fields and nothing
+// else, and every race lists only real units, structures and upgrades.
 type Exact<T, Shape> = T extends Shape ? (Exclude<keyof T, keyof Shape> extends never ? T : never) : never;
-const _upgradesAreEffects: { [K in UpgradeType]: Exact<Config["upgrades"][K], UpgradeEffect & { costEnergy: number; costCrystal: number }> } = CONFIG.upgrades;
+type UpgradeEntry = UpgradeEffect & { appliesTo: UnitType | StructureType | null; costEnergy: number; costCrystal: number };
+const _upgradesAreEffects: { [K in UpgradeType]: Exact<Config["upgrades"][K], UpgradeEntry> } = CONFIG.upgrades;
 void _upgradesAreEffects;
+interface RaceEntry { worker: UnitType; units: readonly UnitType[]; structures: readonly StructureType[]; upgrades: readonly UpgradeType[] }
+const _racesAreValid: { [K in Race]: RaceEntry } = CONFIG.races;
+void _racesAreValid;
 
 const keys = <T extends object>(o: T) => Object.keys(o) as (keyof T & string)[];
 export const UNIT_TYPES: readonly UnitType[] = keys(CONFIG.units);
 export const STRUCTURE_TYPES: readonly StructureType[] = keys(CONFIG.structures);
 export const BUILD_TYPES: readonly BuildType[] = [...STRUCTURE_TYPES, "base"];
-/** Unit/structure types that have an upgrade. */
+/** Every upgrade name. */
 export const UPGRADE_TYPES: readonly UpgradeType[] = keys(CONFIG.upgrades);
+export const RACES: readonly Race[] = keys(CONFIG.races);
+export const DEFAULT_RACE: Race = "classic";
 export const NODE_TYPES: readonly NodeType[] = keys(CONFIG.nodes);

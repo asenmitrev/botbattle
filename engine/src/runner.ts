@@ -1,4 +1,4 @@
-import { CONFIG } from "./config.js";
+import { CONFIG, DEFAULT_RACE, type Race } from "./config.js";
 import { ReplayRecorder, type Replay } from "./replay.js";
 import { createInitialState } from "./state.js";
 import { forfeit, step } from "./step.js";
@@ -18,6 +18,8 @@ export interface BotTurn {
  */
 export interface BotController {
   name: string;
+  /** The race the bot plays (its `race` export); DEFAULT_RACE when absent. */
+  race?: Race;
   turn(view: BotState): BotTurn | Promise<BotTurn>;
   dispose?(): void | Promise<void>;
 }
@@ -36,7 +38,7 @@ export interface MatchOutcome {
 
 export async function runMatch(bots: [BotController, BotController], opts: MatchOptions): Promise<MatchOutcome> {
   const maxFail = opts.maxConsecutiveFailures ?? CONFIG.bot.maxConsecutiveFailures;
-  let state = createInitialState(opts.seed);
+  let state = createInitialState(opts.seed, [bots[0].race ?? DEFAULT_RACE, bots[1].race ?? DEFAULT_RACE]);
   const rec = new ReplayRecorder(opts.seed, [bots[0].name, bots[1].name], state);
   const failures = [0, 0];
 

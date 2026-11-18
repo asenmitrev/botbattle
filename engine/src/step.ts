@@ -1,8 +1,11 @@
 import { BUILD_TYPES, CONFIG, type BuildType, type UpgradeType } from "./config.js";
 import { chebyshev, DIRS, DIR_ORDER_P1, DIR_ORDER_P2, dist2, distanceField, inBounds } from "./geometry.js";
-import { cloneState, computeScore, findSpawnTile, hasUpgrade, makeUnit, occupancy, zoneCenter, zoneRadius } from "./state.js";
-import { buildSpec, cargoCapacity, hasUpgradeType, isUnitType, maxHp, turretImmune, unitSpeed } from "./stats.js";
-import { TILE, type Action, type Dir, type GameEvent, type GameState, type MatchResult, type PlayerId, type Pos, type StepResult, type Unit } from "./types.js";
+import { cloneState, computeScore, findSpawnTile, makeUnit, occupancy, ownedUpgradesFor, raceOf, zoneCenter, zoneRadius } from "./state.js";
+import {
+  attackRange, baseSpec, buildSpec, cargoCapacity, hasUpgradeType, isUnitType, leash, maxHp, passiveEnergy, placementRange, raceCanBuild,
+  raceHasUnit, raceHasUpgrade, turretImmune, unitSpeed,
+} from "./stats.js";
+import { TILE, type Action, type Base, type Dir, type GameEvent, type GameState, type MatchResult, type PlayerId, type Pos, type StepResult, type Structure, type Unit } from "./types.js";
 import { computeVisibility } from "./vision.js";
 
 type UnitAction = Extract<Action, { unitId: number }>;
@@ -50,7 +53,7 @@ export function step(prev: GameState, actionsP1: unknown, actionsP2: unknown): S
   removeDead(state, events);
   const previousHp = new Map(prev.bases.map((b) => [b.id, b.hp]));
   for (const b of state.bases) {
-    if (b.hp <= 0 && (previousHp.get(b.id) ?? CONFIG.base.hp) > 0) {
+    if (b.hp <= 0 && (previousHp.get(b.id) ?? 1) > 0) {
       events.push({ type: "base_destroyed", player: b.owner, baseId: b.id });
       events.push({ type: "death", id: b.id, kind: "base", owner: b.owner, x: b.x, y: b.y });
     }
@@ -62,11 +65,13 @@ export function step(prev: GameState, actionsP1: unknown, actionsP2: unknown): S
     return finish(state, result, events);
   }
 
-  // Phase 7: node regen, zone damage.
+  // Phase 7: node regen, passive income, healing, zone damage.
   for (const n of state.nodes) {
     const nc = CONFIG.nodes[n.type];
     if (nc.regen > 0) n.amount = Math.min(nc.max, n.amount + nc.regen);
   }
+  for (const p of state.players) p.energy += passiveEnergy(p.upgrades);
+  applyHealing(state, events);
   applyZone(state, events);
 
   // Phase 8: vision is derived from state (see vision.ts), nothing stored.
@@ -151,6 +156,7 @@ const UNIT_ACTIONS: { [K in UnitAction["type"]]: (a: RawAction, u: Unit, size: n
     if (CONFIG.units[u.type].damage <= 0) return `${u.type} cannot attack`;
     return isInt(a.targetId) ? { type: "attack", unitId: u.id, targetId: a.targetId } : "missing targetId";
   },
+  transform: (_a, u) => (CONFIG.units[u.type].canTransform ? { type: "transform", unitId: u.id } : `${u.type} cannot transform`),
   build: (a, u, size) => {
     if (!CONFIG.units[u.type].canBuild) return `${u.type} cannot build`;
     const structure = a.structure;
@@ -185,6 +191,7 @@ const PLAYER_ACTIONS: Record<string, (a: RawAction, c: CollectContext) => void> 
   },
   spawn(a, c) {
     if (typeof a.unit !== "string" || !isUnitType(a.unit)) return c.invalid(a, "unknown unit type");
+    if (!raceHasUnit(raceOf(c.state, c.player), a.unit)) return c.invalid(a, `${a.unit} is not a unit of your race`);
     const baseId = a.baseId;
     if (baseId !== undefined && !(isInt(baseId) && c.state.bases.some((b) => b.id === baseId && b.owner === c.player && b.hp > 0))) {
       return c.invalid(a, "no such living base (or not yours)");
@@ -194,6 +201,7 @@ const PLAYER_ACTIONS: Record<string, (a: RawAction, c: CollectContext) => void> 
   },
   upgrade(a, c) {
     if (typeof a.upgrade !== "string" || !hasUpgradeType(a.upgrade)) return c.invalid(a, "unknown upgrade");
+    if (!raceHasUpgrade(raceOf(c.state, c.player), a.upgrade)) return c.invalid(a, `${a.upgrade} is not an upgrade of your race`);
     if (c.intents.upgrades.includes(a.upgrade)) return c.invalid(a, "duplicate upgrade");
     c.intents.upgrades.push(a.upgrade);
   },
@@ -271,11 +279,12 @@ function applyUpgrades(state: GameState, player: PlayerId, intents: Intents, eve
       p.energy -= cost.costEnergy;
       p.crystal -= cost.costCrystal;
       p.upgrades.push(up);
-      // Applies at once to everything of that type the player has; later spawns/builds start upgraded.
+      // Applies at once to everything of its type the player has; later spawns/builds start with it.
+      const target = CONFIG.upgrades[up].appliesTo;
       for (const e of [...state.units, ...state.structures]) {
-        if (e.owner !== player || e.type !== up || e.upgraded) continue;
+        if (e.owner !== player || e.type !== target || e.upgrades.includes(up)) continue;
         const before = maxHp(e);
-        e.upgraded = true;
+        e.upgrades.push(up);
         e.hp += maxHp(e) - before;
       }
       events.push({ type: "upgrade", player, upgrade: up });
@@ -330,6 +339,13 @@ function resolveMovement(prev: GameState, state: GameState, intents: [Intents, I
     return f;
   };
 
+  // Leashed units: distance (Chebyshev) to the nearest living friendly base at the start of movement.
+  const homes: [Base[], Base[]] = [
+    state.bases.filter((b) => b.owner === 1 && b.hp > 0),
+    state.bases.filter((b) => b.owner === 2 && b.hp > 0),
+  ];
+  const homeDist = (owner: PlayerId, x: number, y: number) => homes[owner - 1]!.reduce((d, b) => Math.min(d, chebyshev(b, { x, y })), Infinity);
+
   const noPath = new Set<number>();
   for (let sub = 1; sub <= maxSpeed; sub++) {
     // Desired destination per mover, in ID order.
@@ -350,6 +366,11 @@ function resolveMovement(prev: GameState, state: GameState, intents: [Intents, I
       const nx = u.x + DIRS[dir].x;
       const ny = u.y + DIRS[dir].y;
       if (!inBounds(size, nx, ny) || staticOcc[ny * size + nx]) continue;
+      const limit = leash(u);
+      if (limit !== Infinity) {
+        const d = homeDist(u.owner, nx, ny);
+        if (d > limit && d > homeDist(u.owner, u.x, u.y)) continue; // past the leash, and not heading back
+      }
       target.set(u.id, ny * size + nx);
     }
 
@@ -497,13 +518,24 @@ function resolveDeposit(state: GameState, intents: [Intents, Intents], events: G
 function resolveBuild(state: GameState, intents: [Intents, Intents], events: GameEvent[]): void {
   const size = state.map.size;
   const occ = occupancy(state, true);
-  type Req = { unit: Unit; act: Extract<UnitAction, { type: "build" }>; tile: number };
+  type Act = Extract<UnitAction, { type: "build" | "transform" }>;
+  type Req = { unit: Unit; act: Act; tile: number; structure: BuildType; x: number; y: number };
   const perPlayer: [Req[], Req[]] = [[], []];
   for (const u of state.units) {
     const act = intents[u.owner - 1]!.unit.get(u.id);
+    if (act?.type === "transform") {
+      // The unit becomes a base where it stands: no adjacency, occupancy or distance limit.
+      perPlayer[u.owner - 1]!.push({ unit: u, act, tile: u.y * size + u.x, structure: "base", x: u.x, y: u.y });
+      continue;
+    }
     if (act?.type !== "build") continue;
     const fail = (reason: string) => events.push({ type: "invalid_action", player: u.owner, action: act, reason });
+    const race = raceOf(state, u.owner);
     const tile = act.y * size + act.x;
+    if (!raceCanBuild(race, act.structure)) {
+      fail(`${act.structure} is not a building your race can build`);
+      continue;
+    }
     if (chebyshev(u, act) !== 1) {
       fail("build tile not adjacent to worker");
       continue;
@@ -512,9 +544,9 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
       fail("build tile not empty");
       continue;
     }
-    const sc = buildSpec(act.structure);
-    if (Number.isFinite(sc.maxDistFromBase) && !state.bases.some((b) => b.owner === u.owner && b.hp > 0 && chebyshev(act, b) <= sc.maxDistFromBase)) {
-      fail(`${act.structure} must be within ${sc.maxDistFromBase} tiles of base`);
+    const range = placementRange(act.structure, race, state.players[u.owner - 1]!.upgrades);
+    if (Number.isFinite(range) && !state.bases.some((b) => b.owner === u.owner && b.hp > 0 && chebyshev(act, b) <= range)) {
+      fail(`${act.structure} must be within ${range} tiles of base`);
       continue;
     }
     const list = perPlayer[u.owner - 1]!;
@@ -522,10 +554,11 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
       fail("another of your workers is building on this tile");
       continue;
     }
-    list.push({ unit: u, act, tile });
+    list.push({ unit: u, act, tile, structure: act.structure, x: act.x, y: act.y });
   }
   const tiles1 = new Set(perPlayer[0].map((r) => r.tile));
   const tiles2 = new Set(perPlayer[1].map((r) => r.tile));
+  const transformed = new Set<number>();
   for (const p of PLAYERS) {
     const other = p === 1 ? tiles2 : tiles1;
     const pl = state.players[p - 1]!;
@@ -534,7 +567,7 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
         events.push({ type: "invalid_action", player: p, action: r.act, reason: "both players built on the same tile" });
         continue;
       }
-      const spec = buildSpec(r.act.structure);
+      const spec = buildSpec(r.structure, pl.race);
       if (pl.energy < spec.costEnergy || pl.crystal < spec.costCrystal) {
         events.push({ type: "invalid_action", player: p, action: r.act, reason: "not enough resources" });
         continue;
@@ -542,15 +575,22 @@ function resolveBuild(state: GameState, intents: [Intents, Intents], events: Gam
       pl.energy -= spec.costEnergy;
       pl.crystal -= spec.costCrystal;
       const id = state.nextId++;
-      if (r.act.structure === "base") {
-        state.bases.push({ id, owner: p, x: r.act.x, y: r.act.y, hp: spec.hp });
+      if (r.structure === "base") {
+        state.bases.push({ id, owner: p, x: r.x, y: r.y, hp: spec.hp });
       } else {
-        const upgraded = hasUpgrade(state, p, r.act.structure);
-        state.structures.push({ id, owner: p, type: r.act.structure, x: r.act.x, y: r.act.y, hp: maxHp({ type: r.act.structure, upgraded }), upgraded });
+        const upgrades = ownedUpgradesFor(state, p, r.structure);
+        state.structures.push({ id, owner: p, type: r.structure, x: r.x, y: r.y, hp: maxHp({ type: r.structure, upgrades }), upgrades });
       }
-      events.push({ type: "build", player: p, unitId: r.unit.id, structureId: id, structure: r.act.structure, x: r.act.x, y: r.act.y });
+      if (r.act.type === "transform") {
+        transformed.add(r.unit.id);
+        events.push({ type: "transform", player: p, unitId: r.unit.id, baseId: id, x: r.x, y: r.y });
+      } else {
+        events.push({ type: "build", player: p, unitId: r.unit.id, structureId: id, structure: r.structure, x: r.x, y: r.y });
+      }
     }
   }
+  // A transformed unit is gone (its cargo with it); it isn't a death.
+  if (transformed.size) state.units = state.units.filter((u) => !transformed.has(u.id));
 }
 
 // ============================================================ phase 5
@@ -581,24 +621,41 @@ function resolveCombat(state: GameState, intents: [Intents, Intents], events: Ga
       fail("cannot attack own entity");
       continue;
     }
-    const spec = CONFIG.units[u.type];
-    if (chebyshev(u, t) > spec.range) {
+    if (chebyshev(u, t) > attackRange(u)) {
       fail("target out of range");
       continue;
     }
-    hit(u.id, t, spec.damage);
+    hit(u.id, t, CONFIG.units[u.type].damage);
   }
+
+  // Automatic attacks: the lowest-HP valid target in range, ties to the lowest ID.
+  const lowest = <T extends { id: number; hp: number }>(list: Iterable<T>, ok: (t: T) => boolean): T | null => {
+    let best: T | null = null;
+    for (const t of list) if (ok(t) && (!best || t.hp < best.hp || (t.hp === best.hp && t.id < best.id))) best = t;
+    return best;
+  };
+  const enemyUnit = (from: Pos & { owner: PlayerId }, range: number, skipImmune: boolean) =>
+    lowest(state.units, (u) => u.owner !== from.owner && chebyshev(u, from) <= range && !(skipImmune && turretImmune(u)));
+  const buildings = [...targets.values()].filter((t) => !t.isUnit);
 
   for (const s of state.structures) {
     const sc = CONFIG.structures[s.type];
-    if (sc.damage <= 0) continue;
-    let best: Unit | null = null;
-    for (const u of state.units) {
-      if (u.owner === s.owner || chebyshev(u, s) > sc.range) continue;
-      if (turretImmune(u)) continue;
-      if (!best || u.hp < best.hp || (u.hp === best.hp && u.id < best.id)) best = u;
+    if (sc.damage <= 0 || sc.targets === "none") continue;
+    if (sc.targets === "units") {
+      const best = enemyUnit(s, sc.range, true); // skips units immune to building attacks
+      if (best) hit(s.id, targets.get(best.id)!, sc.damage);
+    } else {
+      const best = lowest(buildings, (t) => t.owner !== s.owner && chebyshev(t, s) <= sc.range);
+      if (best) hit(s.id, best, sc.damage);
     }
-    if (best) hit(s.id, targets.get(best.id)!, sc.damage);
+  }
+  // Bases that shoot (the Tumor Cell) hit the lowest-HP enemy unit in range. Like turrets, they skip units
+  // immune to building attacks (upgraded fighters).
+  for (const b of state.bases) {
+    const bs = baseSpec(raceOf(state, b.owner));
+    if (b.hp <= 0 || bs.damage <= 0) continue;
+    const best = enemyUnit(b, bs.range, true);
+    if (best) hit(b.id, targets.get(best.id)!, bs.damage);
   }
 
   for (const u of state.units) u.hp -= damage.get(u.id) ?? 0;
@@ -613,6 +670,30 @@ function removeDead(state: GameState, events: GameEvent[]): void {
   for (const s of state.structures) if (s.hp <= 0) events.push({ type: "death", id: s.id, kind: "structure", owner: s.owner, x: s.x, y: s.y });
   state.units = state.units.filter((u) => u.hp > 0);
   state.structures = state.structures.filter((s) => s.hp > 0);
+}
+
+/**
+ * Healing structures restore HP to every friendly unit, structure and living base within range, up to its
+ * max HP. Healers act in ID order and each heals separately, so two healers in range heal twice as fast.
+ */
+function applyHealing(state: GameState, events: GameEvent[]): void {
+  type Healable = { id: number; owner: PlayerId; x: number; y: number; hp: number };
+  const healers = state.structures.filter((s) => CONFIG.structures[s.type].heal > 0);
+  if (!healers.length) return;
+  const all: { e: Healable; max: number }[] = [
+    ...state.units.map((u) => ({ e: u as Healable, max: maxHp(u) })),
+    ...state.structures.map((x: Structure) => ({ e: x as Healable, max: maxHp(x) })),
+    ...state.bases.filter((b) => b.hp > 0).map((b) => ({ e: b as Healable, max: baseSpec(raceOf(state, b.owner)).hp })),
+  ].sort((a, b) => a.e.id - b.e.id);
+  for (const h of healers.sort((a, b) => a.id - b.id)) {
+    const sc = CONFIG.structures[h.type];
+    for (const { e, max } of all) {
+      if (e.owner !== h.owner || e.hp >= max || chebyshev(e, h) > sc.range) continue;
+      const amount = Math.min(sc.heal, max - e.hp);
+      e.hp += amount;
+      events.push({ type: "heal", healerId: h.id, targetId: e.id, amount });
+    }
+  }
 }
 
 function applyZone(state: GameState, events: GameEvent[]): void {

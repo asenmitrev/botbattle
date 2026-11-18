@@ -1,8 +1,8 @@
-import { checkBotOutput, CONFIG, CpuBudget, type BotController, type BotState, type BotTurn } from "@arena/engine";
+import { checkBotOutput, CONFIG, CpuBudget, DEFAULT_RACE, parseRaceExport, type BotController, type BotState, type BotTurn, type Race } from "@arena/engine";
 
 type OutMsg =
   | { type: "booted" }
-  | { type: "ready" }
+  | { type: "ready"; race?: string }
   | { type: "initError"; message: string }
   | { type: "result"; id: number; out: unknown; ms: number }
   | { type: "error"; id: number; message: string; ms: number };
@@ -23,6 +23,8 @@ export class WorkerBot implements BotController {
   private broken: string | null = null;
   private pending = new Map<number, (m: OutMsg) => void>();
   private cpu = new CpuBudget();
+  /** The bot's `race` export, read at init. */
+  race: Race = DEFAULT_RACE;
 
   private constructor(readonly name: string, private readonly source: string, private readonly seed: number) {}
 
@@ -71,7 +73,14 @@ export class WorkerBot implements BotController {
     const r = await wait(["ready", "initError"], CONFIG.bot.initMs);
     if (!r) this.broken = `init failed: timeout (top-level code exceeded ${CONFIG.bot.initMs} ms)`;
     else if (r.type === "initError") this.broken = `init failed: ${r.message}`;
-    else this.broken = null;
+    else {
+      const race = parseRaceExport(r.type === "ready" ? r.race : undefined);
+      if ("error" in race) this.broken = `init failed: ${race.error}`;
+      else {
+        this.race = race.race;
+        this.broken = null;
+      }
+    }
     if (this.broken) this.kill();
   }
 

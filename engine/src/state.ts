@@ -1,10 +1,11 @@
-import { CONFIG, type StructureType, type UnitType } from "./config.js";
+import { CONFIG, DEFAULT_RACE, type Race, type StructureType, type UnitType, type UpgradeType } from "./config.js";
 import { ADJ8, inBounds } from "./geometry.js";
 import { generateMap } from "./map.js";
-import { hasUpgradeType, maxHp, unitValue } from "./stats.js";
+import { baseSpec, maxHp, unitValue, upgradesFor } from "./stats.js";
 import { TILE, type Base, type GameState, type PlayerId, type PlayerState, type Pos, type Unit } from "./types.js";
 
-export function createInitialState(seed: number): GameState {
+/** The match's starting state. `races`: each player's race (see CONFIG.races), player 1 first. */
+export function createInitialState(seed: number, races: readonly [Race, Race] = [DEFAULT_RACE, DEFAULT_RACE]): GameState {
   const gen = generateMap(seed);
   let nextId = 1;
   const nodes = [
@@ -16,11 +17,12 @@ export function createInitialState(seed: number): GameState {
   for (const n of nodes) n.id = nextId++;
 
   const bases: [Base, Base] = [
-    { id: nextId++, owner: 1, x: gen.bases[0].x, y: gen.bases[0].y, hp: CONFIG.base.hp },
-    { id: nextId++, owner: 2, x: gen.bases[1].x, y: gen.bases[1].y, hp: CONFIG.base.hp },
+    { id: nextId++, owner: 1, x: gen.bases[0].x, y: gen.bases[0].y, hp: baseSpec(races[0]).hp },
+    { id: nextId++, owner: 2, x: gen.bases[1].x, y: gen.bases[1].y, hp: baseSpec(races[1]).hp },
   ];
   const mkPlayer = (id: PlayerId): PlayerState => ({
     id,
+    race: races[id - 1]!,
     energy: CONFIG.match.startEnergy,
     crystal: CONFIG.match.startCrystal,
     upgrades: [],
@@ -43,20 +45,24 @@ export function createInitialState(seed: number): GameState {
     for (const owner of [1, 2] as const) {
       const tile = findSpawnTile(state, owner);
       if (!tile) throw new Error("no room for starting workers");
-      state.units.push(makeUnit(state, owner, "worker", tile));
+      state.units.push(makeUnit(state, owner, CONFIG.races[races[owner - 1]!].worker, tile));
     }
   }
   return state;
 }
 
 export function makeUnit(state: GameState, owner: PlayerId, type: UnitType, pos: Pos): Unit {
-  const upgraded = hasUpgrade(state, owner, type);
-  return { id: state.nextId++, owner, type, x: pos.x, y: pos.y, hp: maxHp({ type, upgraded }), cargo: { energy: 0, crystal: 0 }, upgraded };
+  const upgrades = ownedUpgradesFor(state, owner, type);
+  return { id: state.nextId++, owner, type, x: pos.x, y: pos.y, hp: maxHp({ type, upgrades }), cargo: { energy: 0, crystal: 0 }, upgrades };
 }
 
-/** Whether `owner` has bought the upgrade for `type` (which then applies to all their entities of that type). */
-export function hasUpgrade(state: GameState, owner: PlayerId, type: UnitType | StructureType): boolean {
-  return hasUpgradeType(type) && state.players[owner - 1]!.upgrades.includes(type);
+/** The upgrades `owner` has bought that apply to `type` (a new entity of that type starts with them). */
+export function ownedUpgradesFor(state: GameState, owner: PlayerId, type: UnitType | StructureType): UpgradeType[] {
+  return upgradesFor(type, state.players[owner - 1]!.upgrades);
+}
+
+export function raceOf(state: GameState, owner: PlayerId): Race {
+  return state.players[owner - 1]!.race;
 }
 
 /** Occupancy grid: 1 for every tile blocked by terrain, nodes, bases, structures or units. */
@@ -102,8 +108,8 @@ export function cloneState(s: GameState): GameState {
       clonePlayer(s.players[0]),
       clonePlayer(s.players[1]),
     ],
-    units: s.units.map((u) => ({ ...u, cargo: { ...u.cargo } })),
-    structures: s.structures.map((x) => ({ ...x })),
+    units: s.units.map((u) => ({ ...u, cargo: { ...u.cargo }, upgrades: [...u.upgrades] })),
+    structures: s.structures.map((x) => ({ ...x, upgrades: [...x.upgrades] })),
     nextId: s.nextId,
     result: s.result ? { ...s.result, scores: [...s.result.scores], units: [...s.result.units] } : null,
   };

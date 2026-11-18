@@ -7,13 +7,13 @@ import { addUnit, testState } from "./util.js";
 function arena(): { s: GameState; tracker: MatchStatsTracker } {
   const s = testState();
   s.units.push(
-    { id: 100, owner: 1, type: "fighter", x: 10, y: 10, hp: 30, cargo: { energy: 0, crystal: 0 }, upgraded: false },
-    { id: 101, owner: 1, type: "fighter", x: 12, y: 10, hp: 30, cargo: { energy: 0, crystal: 0 }, upgraded: false },
-    { id: 200, owner: 2, type: "worker", x: 11, y: 10, hp: 10, cargo: { energy: 0, crystal: 0 }, upgraded: false },
-    { id: 201, owner: 2, type: "worker", x: 11, y: 11, hp: 10, cargo: { energy: 0, crystal: 0 }, upgraded: false },
-    { id: 202, owner: 2, type: "scout", x: 11, y: 12, hp: 5, cargo: { energy: 0, crystal: 0 }, upgraded: false },
+    { id: 100, owner: 1, type: "fighter", x: 10, y: 10, hp: 30, cargo: { energy: 0, crystal: 0 }, upgrades: [] },
+    { id: 101, owner: 1, type: "fighter", x: 12, y: 10, hp: 30, cargo: { energy: 0, crystal: 0 }, upgrades: [] },
+    { id: 200, owner: 2, type: "worker", x: 11, y: 10, hp: 10, cargo: { energy: 0, crystal: 0 }, upgrades: [] },
+    { id: 201, owner: 2, type: "worker", x: 11, y: 11, hp: 10, cargo: { energy: 0, crystal: 0 }, upgrades: [] },
+    { id: 202, owner: 2, type: "scout", x: 11, y: 12, hp: 5, cargo: { energy: 0, crystal: 0 }, upgrades: [] },
   );
-  s.structures.push({ id: 102, owner: 1, type: "turret", x: 9, y: 9, hp: 50, upgraded: false });
+  s.structures.push({ id: 102, owner: 1, type: "turret", x: 9, y: 9, hp: 50, upgrades: [] });
   return { s, tracker: new MatchStatsTracker(s) };
 }
 
@@ -153,7 +153,7 @@ describe("with real engine steps", () => {
     const f1 = addUnit(s, 1, "fighter", 10, 10);
     const sc = addUnit(s, 2, "scout", 11, 10);
     const f2 = addUnit(s, 1, "fighter", 12, 10);
-    s.structures.push({ id: s.nextId++, owner: 2, type: "turret", x: 30, y: 30, hp: 50, upgraded: false });
+    s.structures.push({ id: s.nextId++, owner: 2, type: "turret", x: 30, y: 30, hp: 50, upgrades: [] });
     const w = addUnit(s, 1, "worker", 31, 30);
     const tracker = new MatchStatsTracker(s);
     const { events } = step(s, [{ type: "attack", unitId: f1.id, targetId: sc.id }, { type: "attack", unitId: f2.id, targetId: sc.id }], []);

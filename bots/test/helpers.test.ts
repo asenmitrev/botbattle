@@ -9,7 +9,8 @@ describe("bot helper library", () => {
   it("COSTS matches CONFIG for every unit, structure and base", () => {
     const expected = Object.fromEntries([
       ...UNIT_TYPES.map((t) => [t, cost(CONFIG.units[t])]),
-      ...BUILD_TYPES.map((t) => [t, cost(buildSpec(t))]),
+      ...BUILD_TYPES.map((t) => [t, cost(buildSpec(t, "classic"))]),
+      ["tumorCell", cost(buildSpec("base", "tumor"))],
     ]);
     expect(COSTS).toEqual(expected);
   });

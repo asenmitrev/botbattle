@@ -1,4 +1,4 @@
-import type { BuildType, NodeType, StructureType, UnitType, UpgradeType } from "./config.js";
+import type { BuildType, NodeType, Race, StructureType, UnitType, UpgradeType } from "./config.js";
 
 export type PlayerId = 1 | 2;
 export type Dir = "N" | "S" | "E" | "W";
@@ -41,8 +41,8 @@ export interface Unit extends Pos {
   type: UnitType;
   hp: number;
   cargo: Cargo;
-  /** Its owner bought this type's upgrade (see CONFIG.upgrades and stats.ts). */
-  upgraded: boolean;
+  /** Upgrades its owner bought that apply to its type, in purchase order (see CONFIG.upgrades and stats.ts). */
+  upgrades: UpgradeType[];
 }
 
 export interface Structure extends Pos {
@@ -50,15 +50,17 @@ export interface Structure extends Pos {
   owner: PlayerId;
   type: StructureType;
   hp: number;
-  /** Its owner bought this type's upgrade (see CONFIG.upgrades and stats.ts). */
-  upgraded: boolean;
+  /** Upgrades its owner bought that apply to its type, in purchase order (see CONFIG.upgrades and stats.ts). */
+  upgrades: UpgradeType[];
 }
 
 export interface PlayerState {
   id: PlayerId;
+  /** Fixed for the match: decides the base, units, structures and upgrades the player can use. */
+  race: Race;
   energy: number;
   crystal: number;
-  /** Upgrade types this player has bought, in purchase order (see CONFIG.upgrades). */
+  /** Upgrades this player has bought, in purchase order (see CONFIG.upgrades). */
   upgrades: UpgradeType[];
 }
 
@@ -97,8 +99,10 @@ export type Action =
   | { type: "deposit"; unitId: number }
   | { type: "attack"; unitId: number; targetId: number }
   | { type: "build"; unitId: number; structure: BuildType; x: number; y: number }
+  /** A unit with `canTransform` (the Tumor Stem Cell) becomes a base of its race on its own tile. */
+  | { type: "transform"; unitId: number }
   | { type: "spawn"; unit: UnitType; baseId?: number }
-  /** Buy a type's upgrade for all your units/walls of that type, current and future. */
+  /** Buy an upgrade of your race (one with a target type covers all your entities of it, current and future). */
   | { type: "upgrade"; upgrade: UpgradeType }
   | { type: "log"; text: string }
   | { type: "mark"; x: number; y: number; color?: string; label?: string };
@@ -114,6 +118,9 @@ export type GameEvent =
   | { type: "harvest"; player: PlayerId; unitId: number; nodeId: number; resource: NodeType; amount: number }
   | { type: "deposit"; player: PlayerId; unitId: number; energy: number; crystal: number }
   | { type: "build"; player: PlayerId; unitId: number; structureId: number; structure: BuildType; x: number; y: number }
+  /** The unit is gone; base `baseId` stands on its tile. */
+  | { type: "transform"; player: PlayerId; unitId: number; baseId: number; x: number; y: number }
+  | { type: "heal"; healerId: number; targetId: number; amount: number }
   | { type: "attack"; attackerId: number; targetId: number; damage: number }
   | { type: "zone_damage"; targetId: number; damage: number }
   | { type: "death"; id: number; kind: EntityKind; owner: PlayerId; x: number; y: number }

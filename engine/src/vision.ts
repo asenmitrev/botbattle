@@ -1,7 +1,7 @@
-import { CONFIG, UPGRADE_TYPES, type NodeType, type StructureType, type UnitType, type UpgradeType } from "./config.js";
+import { CONFIG, type Race, type NodeType, type StructureType, type UnitType, type UpgradeType } from "./config.js";
 import { dist2 } from "./geometry.js";
-import { zoneCenter, zoneRadius } from "./state.js";
-import { cargoCapacity, maxHp } from "./stats.js";
+import { raceOf, zoneCenter, zoneRadius } from "./state.js";
+import { attackRange, baseSpec, cargoCapacity, leash, maxHp } from "./stats.js";
 import { TILE, type GameState, type PlayerId, type Pos, type TileType } from "./types.js";
 
 /** Visibility grid for a player: 1 = visible. Vision is a Euclidean circle; no line of sight. */
@@ -17,7 +17,8 @@ export function computeVisibility(state: GameState, player: PlayerId): Uint8Arra
       }
     }
   };
-  for (const b of state.bases) if (b.owner === player && b.hp > 0) reveal(b, CONFIG.base.vision);
+  const baseVision = baseSpec(raceOf(state, player)).vision;
+  for (const b of state.bases) if (b.owner === player && b.hp > 0) reveal(b, baseVision);
   for (const u of state.units) if (u.owner === player) reveal(u, CONFIG.units[u.type].vision);
   for (const s of state.structures) if (s.owner === player) reveal(s, CONFIG.structures[s.type].vision);
   return vis;
@@ -34,7 +35,13 @@ export interface BotUnit {
   maxHp: number;
   cargo: { energy: number; crystal: number };
   cargoCapacity: number;
+  /** Attack range after upgrades (0 for units that can't attack). */
+  range: number;
+  /** How far it may stray from your nearest base (null: no leash). */
+  leash: number | null;
+  /** Whether any upgrade applies to it, and which. */
   upgraded: boolean;
+  upgrades: UpgradeType[];
 }
 
 export interface BotStructure {
@@ -45,6 +52,7 @@ export interface BotStructure {
   hp: number;
   maxHp: number;
   upgraded: boolean;
+  upgrades: UpgradeType[];
 }
 
 export type BotEnemy =
@@ -69,6 +77,8 @@ export interface BotTile {
 export interface BotState {
   tick: number;
   player: PlayerId;
+  /** Your race (what your bot exports as `race`, else "classic"). */
+  race: Race;
   myBase: { id: number; x: number; y: number; hp: number };
   myBases: { id: number; x: number; y: number; hp: number }[];
   startingBase: { x: number; y: number };
@@ -76,8 +86,8 @@ export interface BotState {
   myStructures: BotStructure[];
   energy: number;
   crystal: number;
-  /** Which per-type upgrades you have bought (each covers all your entities of that type, current and future). */
-  myUpgrades: Record<UpgradeType, boolean>;
+  /** Your race's upgrades and whether you have bought each (one with a target type covers all your entities of it, current and future). */
+  myUpgrades: Partial<Record<UpgradeType, boolean>>;
   visibleEnemies: BotEnemy[];
   visibleNodes: BotNode[];
   visibleTiles: BotTile[];
@@ -109,10 +119,10 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
     if (b.owner !== player && b.hp > 0 && seen(b)) visibleEnemies.push({ id: b.id, kind: "base", type: "base", x: b.x, y: b.y, hp: b.hp });
   }
   for (const u of state.units) {
-    if (u.owner !== player && seen(u)) visibleEnemies.push({ id: u.id, kind: "unit", type: u.type, x: u.x, y: u.y, hp: u.hp, upgraded: u.upgraded });
+    if (u.owner !== player && seen(u)) visibleEnemies.push({ id: u.id, kind: "unit", type: u.type, x: u.x, y: u.y, hp: u.hp, upgraded: u.upgrades.length > 0 });
   }
   for (const s of state.structures) {
-    if (s.owner !== player && seen(s)) visibleEnemies.push({ id: s.id, kind: "structure", type: s.type, x: s.x, y: s.y, hp: s.hp, upgraded: s.upgraded });
+    if (s.owner !== player && seen(s)) visibleEnemies.push({ id: s.id, kind: "structure", type: s.type, x: s.x, y: s.y, hp: s.hp, upgraded: s.upgrades.length > 0 });
   }
   visibleEnemies.sort((a, b) => a.id - b.id);
 
@@ -127,6 +137,7 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
   return {
     tick: state.tick,
     player,
+    race: me.race,
     myBase: { id: base.id, x: base.x, y: base.y, hp: base.hp },
     myBases,
     startingBase: { x: startingBase.x, y: startingBase.y },
@@ -141,14 +152,17 @@ export function buildBotView(state: GameState, player: PlayerId, vis = computeVi
         maxHp: maxHp(u),
         cargo: { ...u.cargo },
         cargoCapacity: cargoCapacity(u.type),
-        upgraded: u.upgraded,
+        range: attackRange(u),
+        leash: Number.isFinite(leash(u)) ? leash(u) : null,
+        upgraded: u.upgrades.length > 0,
+        upgrades: [...u.upgrades],
       })),
     myStructures: state.structures
       .filter((s) => s.owner === player)
-      .map((s) => ({ id: s.id, type: s.type, x: s.x, y: s.y, hp: s.hp, maxHp: maxHp(s), upgraded: s.upgraded })),
+      .map((s) => ({ id: s.id, type: s.type, x: s.x, y: s.y, hp: s.hp, maxHp: maxHp(s), upgraded: s.upgrades.length > 0, upgrades: [...s.upgrades] })),
     energy: me.energy,
     crystal: me.crystal,
-    myUpgrades: Object.fromEntries(UPGRADE_TYPES.map((t) => [t, me.upgrades.includes(t)])) as Record<UpgradeType, boolean>,
+    myUpgrades: Object.fromEntries(CONFIG.races[me.race].upgrades.map((t) => [t, me.upgrades.includes(t)])) as Partial<Record<UpgradeType, boolean>>,
     visibleEnemies,
     visibleNodes: state.nodes.filter(seen).map((n) => ({ id: n.id, type: n.type, x: n.x, y: n.y, amount: n.amount })),
     visibleTiles,

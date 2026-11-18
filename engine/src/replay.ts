@@ -1,4 +1,4 @@
-import { CONFIG, CONFIG_VERSION } from "./config.js";
+import { CONFIG, CONFIG_VERSION, type Race } from "./config.js";
 import { hashState } from "./hash.js";
 import { cloneState, createInitialState } from "./state.js";
 import { forfeit, step } from "./step.js";
@@ -25,6 +25,8 @@ export interface Replay {
   config: typeof CONFIG;
   seed: number;
   bots: [string, string];
+  /** Each player's race (the initial state depends on it). */
+  races: [Race, Race];
   ticks: TickRecord[];
   /** Full-state snapshots every CONFIG.replay.snapshotEvery ticks (state *before* that tick), plus tick 0. */
   snapshots: { tick: number; state: GameState }[];
@@ -44,6 +46,7 @@ export class ReplayRecorder {
       config: CONFIG,
       seed,
       bots,
+      races: [initial.players[0].race, initial.players[1].race],
       ticks: [],
       snapshots: [{ tick: initial.tick, state: cloneState(initial) }],
       result: null,
@@ -89,10 +92,10 @@ export function simulateReplay(replay: Replay, untilTick?: number): GameState {
   let from = 0;
   if (untilTick !== undefined) {
     const snap = [...replay.snapshots].reverse().find((s) => s.tick <= untilTick);
-    state = snap ? cloneState(snap.state) : createInitialState(replay.seed);
+    state = snap ? cloneState(snap.state) : createInitialState(replay.seed, replay.races);
     from = snap ? snap.tick : 0;
   } else {
-    state = createInitialState(replay.seed);
+    state = createInitialState(replay.seed, replay.races);
   }
   for (const rec of replay.ticks) {
     if (rec.tick < from) continue;

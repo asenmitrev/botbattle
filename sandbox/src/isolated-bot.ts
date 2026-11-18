@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ivm from "isolated-vm";
-import { checkBotOutput, CONFIG, CpuBudget, type BotController, type BotState, type BotTurn } from "@arena/engine";
+import { checkBotOutput, CONFIG, CpuBudget, DEFAULT_RACE, parseRaceExport, type BotController, type BotState, type BotTurn, type Race } from "@arena/engine";
 
 /** Canonical helper library, exposed to bots as the global `Arena` and as `import ... from "arena"`. */
 export const HELPERS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../bots/lib/helpers.js");
@@ -47,9 +47,11 @@ const BOOTSTRAP = `
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
   let onTick = null;
-  g.__arenaSetBot = function (fn) {
+  g.__arenaSetBot = function (fn, race) {
     if (typeof fn !== "function") throw new TypeError("bot must export a function onTick(state, memory)");
     onTick = fn;
+    // Copied out by the host right after init. Anything but a string is reported as an invalid race.
+    g.__arenaRace = race === undefined ? undefined : typeof race === "string" ? race : stringify(race) || String(race);
   };
   g.__arenaTick = function (stateJson, memoryJson) {
     const state = parse(stateJson);
@@ -72,7 +74,8 @@ const ENTRY = `
 import "arena:globals";
 import * as bot from "__bot__";
 const fn = typeof bot.onTick === "function" ? bot.onTick : bot.default && bot.default.onTick;
-globalThis.__arenaSetBot(fn);
+const race = bot.race !== undefined ? bot.race : bot.default && bot.default.race;
+globalThis.__arenaSetBot(fn, race);
 delete globalThis.__arenaSetBot;
 delete globalThis.__arenaTick;
 `;
@@ -87,6 +90,8 @@ class SandboxError extends Error {}
  */
 export class IsolatedBot implements BotController {
   readonly name: string;
+  /** The bot's `race` export, read at init (DEFAULT_RACE if absent or if init failed). */
+  race: Race = DEFAULT_RACE;
   private isolate: ivm.Isolate | null = null;
   private tickRef: ivm.Reference<(s: string, m: string) => [string, string]> | null = null;
   private memoryJson = "{}";
@@ -162,6 +167,11 @@ export class IsolatedBot implements BotController {
       await entry.evaluate({ timeout: this.opts.initMs });
       const cpuMs = Number(isolate.cpuTime - before) / 1e6;
       if (cpuMs > this.opts.initMs) throw new SandboxError(`init exceeded ${this.opts.initMs} ms CPU (${cpuMs.toFixed(0)} ms)`);
+      const raw: unknown = await context.global.get("__arenaRace", { copy: true });
+      await context.global.delete("__arenaRace");
+      const race = parseRaceExport(raw);
+      if ("error" in race) throw new SandboxError(race.error);
+      this.race = race.race;
       this.broken = null;
     } catch (e) {
       this.broken = `init failed: ${describeError(e, this.isolate)}`;
