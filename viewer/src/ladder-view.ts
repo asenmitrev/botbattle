@@ -4,7 +4,8 @@ import type { Replay } from "@arena/engine";
  * Ladder view: the leaderboard takes the code panel's place and the board plays ladder matches one after
  * another. Each pick looks at the games it hasn't shown yet that finished since the previous pick, plus the
  * newest few, and plays the one with the biggest Elo swing (upsets first; ties go to the newest). Once it
- * has shown every game it starts over. Frontend only: the match list is the union of every bot's
+ * has shown every game it starts over.
+ * Selecting a bot follows it instead: its latest game at once, then each new game of it as it appears. Frontend only: the match list is the union of every bot's
  * recent matches (there is no ladder-wide match list endpoint).
  */
 
@@ -52,6 +53,8 @@ const POOL = 5;
 const SHOWN = 25;
 const NEXT_DELAY_MS = 4000;
 const REFRESH_MS = 10_000;
+/** How often to look for a followed bot's next game while waiting for it. */
+const WAIT_POLL_MS = 5000;
 const HASH = "#ladder";
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -94,8 +97,12 @@ export function initLadderView(hooks: Hooks): LadderView {
   let current: Match | null = null;
   /** Newest game time at the previous pick: anything after it finished while we were watching. */
   let horizon = "";
-  /** Bot whose games the match list is narrowed to (click a leaderboard row). */
+  /** Followed bot (click a leaderboard row): the list shows only its games and the board plays them as they appear. */
   let filter: string | null = null;
+  /** Time of the followed bot's last game we played: its later games are the queue. */
+  let followAt = "";
+  /** Following a bot that has no new game yet. */
+  let waiting = false;
   let nextAt = 0;
   let nextTimer = 0;
   let refreshTimer = 0;
@@ -130,6 +137,8 @@ export function initLadderView(hooks: Hooks): LadderView {
     nextAt = 0;
     await refresh();
     if (!on) return;
+    waiting = false;
+    if (filter) return followNext();
     if (!matches.some((x) => !seen.has(x.id))) seen.clear();
     const unseen = matches.filter((x) => !seen.has(x.id)); // newest first
     const pool = unseen.filter((x, i) => i < POOL || (horizon && x.at > horizon));
@@ -144,9 +153,45 @@ export function initLadderView(hooks: Hooks): LadderView {
     await playMatch(m);
   }
 
+  const involves = (m: Match, id: string) => m.p1.id === id || m.p2.id === id;
+
+  /** The followed bot's oldest game after the last one we played, or wait for one. */
+  async function followNext(): Promise<void> {
+    const m = matches.filter((x) => involves(x, filter!) && x.at > followAt).at(-1);
+    if (m) return playMatch(m);
+    token++;
+    current = null;
+    waiting = true;
+    render();
+    nextTimer = window.setTimeout(() => void next(), WAIT_POLL_MS);
+  }
+
+  /** Follow a bot (start with its latest game), or stop following (null) and go back to upsets. */
+  function follow(id: string | null): void {
+    filter = id;
+    if (id) {
+      const latest = matches.find((x) => involves(x, id));
+      followAt = "";
+      if (latest) {
+        clearTimeout(nextTimer);
+        clearInterval(countdown);
+        nextAt = 0;
+        waiting = false;
+        void playMatch(latest);
+        return;
+      }
+      void next();
+      return;
+    }
+    // Let the game on screen finish; only a wait for the followed bot is cut short.
+    if (waiting || !current) void next();
+    else render();
+  }
+
   async function playMatch(m: Match): Promise<void> {
     const mine = ++token;
     seen.add(m.id);
+    if (filter && involves(m, filter) && m.at > followAt) followAt = m.at;
     current = m;
     render();
     try {
@@ -178,7 +223,7 @@ export function initLadderView(hooks: Hooks): LadderView {
       .map((r) => {
         const side = current?.p1.id === r.id ? 1 : current?.p2.id === r.id ? 2 : 0;
         const tags = [r.house ? `<span class="tag">house</span>` : "", r.provisional ? `<span class="tag" title="Fewer than 10 games since the last version">provisional</span>` : ""].join("");
-        return `<tr data-bot="${esc(r.id)}" class="${playing.has(r.id) ? `playing p${side}` : ""}${r.id === filter ? " selected" : ""}" title="Show ${esc(r.name)}'s games">
+        return `<tr data-bot="${esc(r.id)}" class="${playing.has(r.id) ? `playing p${side}` : ""}${r.id === filter ? " selected" : ""}" title="${r.id === filter ? "Stop following" : `Follow ${esc(r.name)}: its latest game, then each new one`}">
           <td>${r.rank}</td><td>${side ? `<span class="dot p${side}"></span> ` : ""}${esc(r.name)}${r.version > 1 ? ` <span class="muted">v${r.version}</span>` : ""}${tags}</td>
           <td><strong>${Math.round(r.elo)}</strong></td><td>${r.wins}-${r.losses}-${r.draws}</td><td>${r.games}</td></tr>`;
       })
@@ -186,7 +231,7 @@ export function initLadderView(hooks: Hooks): LadderView {
     const list = filter ? matches.filter((m) => m.p1.id === filter || m.p2.id === filter) : matches;
     const fname = filter ? rows.find((r) => r.id === filter)?.name ?? "" : "";
     $("lv-matches-title").innerHTML = filter
-      ? `${esc(fname)}'s games <button class="btn ghost small" data-lv="all">Show all</button>`
+      ? `Following ${esc(fname)}: its games as they appear <button class="btn ghost small" data-lv="all" title="Back to the biggest upsets">Show all</button>`
       : `Recent games <span class="muted">(click one to watch)</span>`;
     $("lv-matches").innerHTML = list.length
       ? list
@@ -204,6 +249,12 @@ export function initLadderView(hooks: Hooks): LadderView {
 
   function renderNowPlaying(): void {
     const el = $("lv-now");
+    if (waiting && filter) {
+      const name = rows.find((r) => r.id === filter)?.name ?? "this bot";
+      el.innerHTML = `<span class="lv-live">◉ Following ${esc(name)}</span><span class="muted">waiting for its next game…</span>
+        <button class="btn ghost small" data-lv="all" title="Back to the biggest upsets">Stop following</button>`;
+      return;
+    }
     if (!current) {
       el.innerHTML = matches.length
         ? `<span class="muted">Playing a game picked elsewhere; the queue carries on after it.</span> <button class="btn ghost small" data-lv="skip">Skip ⏭</button>`
@@ -231,6 +282,7 @@ export function initLadderView(hooks: Hooks): LadderView {
     clearInterval(countdown);
     clearInterval(refreshTimer);
     nextAt = 0;
+    waiting = false;
     token++;
     if (!on) return;
     seen.clear();
@@ -247,12 +299,9 @@ export function initLadderView(hooks: Hooks): LadderView {
   box.addEventListener("click", (e) => {
     const t = e.target as HTMLElement;
     if (t.closest("[data-lv=skip]")) return void next();
-    if (t.closest("[data-lv=all]")) return void ((filter = null), render());
+    if (t.closest("[data-lv=all]")) return follow(null);
     const bot = t.closest<HTMLElement>("tr[data-bot]");
-    if (bot) {
-      filter = filter === bot.dataset.bot ? null : bot.dataset.bot!;
-      return render();
-    }
+    if (bot) return follow(filter === bot.dataset.bot ? null : bot.dataset.bot!);
     const row = t.closest<HTMLElement>("[data-match]");
     const m = row && matches.find((x) => x.id === row.dataset.match);
     if (!m) return;
@@ -275,6 +324,7 @@ export function initLadderView(hooks: Hooks): LadderView {
       clearTimeout(nextTimer);
       clearInterval(countdown);
       nextAt = 0;
+      waiting = false;
       current = null;
       render();
     },
