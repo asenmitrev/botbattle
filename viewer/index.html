@@ -21,6 +21,7 @@
             <button id="stipend-btn" class="stipend-btn" title="Claim today's free botcoin" hidden>Claim +100</button>
             <div id="wallet-pop" class="wallet-pop" role="dialog" aria-label="Botcoin" hidden></div>
           </span>
+          <button id="ladder-view-btn" class="btn" aria-pressed="false" title="Leaderboard + the most recent ladder games, one after another" hidden>Watch ladder</button>
           <button id="leaderboard-btn" class="btn" hidden>Leaderboard</button>
           <button id="howto-btn" class="btn">How to play</button>
           <button id="readme-btn" class="btn">README · Bot API</button>
@@ -119,6 +120,18 @@
           <div class="editor-foot">
             <span id="status" class="status mono">Ready.</span>
             <button id="reset-btn" class="btn ghost small" title="Replace your code with the starter bot">Reset to starter</button>
+          </div>
+          <div id="ladder-view" class="ladder-view" aria-label="Ladder">
+            <div class="lv-head"><strong>Leaderboard</strong><span class="lv-meta muted"></span></div>
+            <div id="lv-now" class="lv-now"></div>
+            <div class="lv-body">
+              <table class="ladder-table lv-table">
+                <thead><tr><th>#</th><th>Bot</th><th>Elo</th><th>W-L-D</th><th>Games</th></tr></thead>
+                <tbody id="lv-rows"></tbody>
+              </table>
+              <h4 id="lv-matches-title" class="lv-title"></h4>
+              <div id="lv-matches" class="lv-matches"></div>
+            </div>
           </div>
         </section>
       </main>

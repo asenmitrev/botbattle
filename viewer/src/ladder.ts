@@ -197,17 +197,18 @@ async function getJSON<T>(url: string): Promise<T> {
 
 let playoffLive = false;
 
-export async function initLadder(hooks: Hooks): Promise<void> {
+/** Resolves true when a ladder server answered (and its UI was set up). */
+export async function initLadder(hooks: Hooks): Promise<boolean> {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 1500);
     const r = await fetch("/api/health", { signal: ctrl.signal, cache: "no-store" });
     clearTimeout(t);
     const h = r.ok ? ((await r.json()) as { ok?: boolean; playoff?: boolean }) : null;
-    if (!h?.ok) return;
+    if (!h?.ok) return false;
     playoffLive = !!h.playoff;
   } catch {
-    return; // no ladder server (plain playground / arena view)
+    return false; // no ladder server (plain playground / arena view)
   }
 
   let me = loadIdentity();
@@ -846,4 +847,5 @@ export async function initLadder(hooks: Hooks): Promise<void> {
     clearInterval(timer);
     clearTimeout(playoffTimer);
   });
+  return true;
 }

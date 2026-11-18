@@ -24,6 +24,7 @@ import { BoardRenderer, type RenderOptions } from "./renderer.js";
 import { ReplayModel, type Series } from "./replay-model.js";
 import { WorkerBot } from "./worker-bot.js";
 import { initLadder, owner } from "./ladder.js";
+import { initLadderView, type LadderView } from "./ladder-view.js";
 import { SPRITE_URLS } from "./sprites.js";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -295,8 +296,10 @@ $("reset-btn").addEventListener("click", () => {
 
 // ------------------------------------------------------------------ replay loading
 let currentReplay: Replay | null = null;
+let ladderView: LadderView | null = null;
 
-function showReplay(replay: Replay): boolean {
+/** `fromLadderView`: the ladder view's own queue; anything else tells the view a game was picked elsewhere. */
+function showReplay(replay: Replay, fromLadderView = false): boolean {
   try {
     model = new ReplayModel(replay);
     board.resetAim();
@@ -313,6 +316,7 @@ function showReplay(replay: Replay): boolean {
   play(false);
   seek(0);
   if (!model.verified) status("Warning: re-simulating this replay did not reproduce its recorded final state.", "err");
+  if (!fromLadderView) ladderView?.replaced();
   return true;
 }
 
@@ -370,7 +374,10 @@ function frame(now: number): void {
     if (steps > 0) {
       acc -= steps;
       seek(t + steps);
-      if (t >= model.lastIndex) play(false);
+      if (t >= model.lastIndex) {
+        play(false);
+        ladderView?.ended();
+      }
     }
   }
   lastFrame = now;
@@ -714,7 +721,8 @@ $("howto-copy").addEventListener("click", async () => {
   }
   setTimeout(() => (btn.textContent = "Copy README"), 1500);
 });
-if (!load(HOWTO_KEY)) howto.showModal();
+// Not over a spectator link to the ladder view.
+if (!load(HOWTO_KEY) && location.hash !== "#ladder") howto.showModal();
 
 // ------------------------------------------------------------------ layout
 // Draggable divider between the board (left) and the editor (right). The split is a fraction of the
@@ -826,7 +834,7 @@ ro.observe($("board"));
 for (const el of document.querySelectorAll<HTMLElement>(".chart")) ro.observe(el);
 
 // ------------------------------------------------------------------ ranked ladder (only when served by `arena server`)
-void initLadder({
+const ladderReady = initLadder({
   botDeleted: () => {
     void loadLadderBots().then(persistSettings);
   },
@@ -837,6 +845,17 @@ void initLadder({
     return true;
   },
   status,
+});
+void ladderReady.then((ok) => {
+  if (!ok) return;
+  ladderView = initLadderView({
+    playReplay: (r) => {
+      if (!showReplay(r, true)) return false;
+      play(true);
+      return true;
+    },
+    status,
+  });
 });
 
 // ------------------------------------------------------------------ startup
@@ -851,5 +870,7 @@ void initLadder({
       status(`Could not fetch ${replayUrl}: ${String(e)}`, "err");
     }
   }
+  // The ladder view plays ladder games instead of a warm-up match.
+  if (location.hash === "#ladder" && (await ladderReady)) return;
   await runOne();
 })();

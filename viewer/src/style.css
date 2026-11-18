@@ -319,3 +319,39 @@ span.pip.a, span.pip.b { color: #fff; }
 .pip.next { border-color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .playoff-head .live, .pip.next { animation: none; } }
+
+/* ---- ladder view: the leaderboard replaces the code panel; the board plays recent ladder games */
+.ladder-view { display: none; }
+body.lv-on .pane.right > :not(.ladder-view) { display: none; }
+body.lv-on .ladder-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#ladder-view-btn[aria-pressed="true"] { border-color: var(--accent); }
+.lv-head { display: flex; align-items: baseline; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.lv-meta { font-size: 12px; }
+.lv-now { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); font-variant-numeric: tabular-nums; }
+.lv-now .btn { margin-left: auto; }
+.lv-live { font-weight: 700; color: var(--ok); }
+.lv-now .p1, .lv-matches .p1 { color: var(--p1); }
+.lv-now .p2, .lv-matches .p2 { color: var(--p2); }
+.lv-body { flex: 1; min-height: 0; overflow: auto; padding: 8px 12px 16px; }
+.lv-table tr.playing td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.lv-table tr.playing.p2 td { background: color-mix(in srgb, var(--p2) 16%, transparent); }
+.lv-title { margin: 16px 0 6px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.lv-matches { display: grid; gap: 2px; }
+.lv-match { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.lv-match:hover { background: var(--surface-2); }
+.lv-match.current { outline: 1px solid var(--accent); outline-offset: -1px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.lv-match.seen { opacity: .6; }
+.lv-match .muted { font-size: 12px; }
+@media (max-width: 1000px) {
+  /* Stacked: board first, the leaderboard right under it (skip the log panel), scrolling with the page. */
+  body.lv-on .logs, body.lv-on .toggles { display: none; }
+  body.lv-on .pane.right { min-height: 0; }
+  body.lv-on .lv-body { overflow: visible; }
+  .lv-head, .lv-now, .lv-body { padding-left: 16px; padding-right: 16px; }
+}
+@media (max-width: 480px) {
+  .lv-table th:nth-child(5), .lv-table td:nth-child(5) { display: none; }
+  .lv-table th, .lv-table td { padding: 5px 4px; }
+}
+.tag.upset { background: color-mix(in srgb, var(--gold) 30%, transparent); color: var(--gold-strong); }
+.lv-now .tag, .lv-match .tag { margin-left: 0; }
