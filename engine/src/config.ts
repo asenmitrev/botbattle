@@ -2,7 +2,7 @@
 // (`pnpm readme`; a test fails while they are stale). Bump CONFIG_VERSION whenever any value below
 // or any rule in step.ts changes: replays record it and only replay under the same version.
 
-export const CONFIG_VERSION = "4.7.0";
+export const CONFIG_VERSION = "4.9.0";
 
 export const CONFIG = {
   map: {
@@ -55,7 +55,7 @@ export const CONFIG = {
     },
     tumor: {
       /** The Tumor Cell. It shoots the lowest-HP enemy unit in range, like a turret (and skips upgraded fighters). */
-      base: { costEnergy: 75, costCrystal: 0, hp: 30, vision: 10, damage: 1, range: 3, maxDistFromBase: Infinity },
+      base: { costEnergy: 75, costCrystal: 0, hp: 50, vision: 10, damage: 1, range: 3, maxDistFromBase: Infinity },
       worker: "stemCell",
       units: ["stemCell", "immuneCell"],
       structures: ["purificationCell", "siegeCell"],
@@ -74,7 +74,7 @@ export const CONFIG = {
     fighter: { costEnergy: 60, costCrystal: 15, hp: 30, speed: 1, vision: 5, carry: 0, harvest: 0, damage: 6, range: 1, canBuild: false, canTransform: false, leash: Infinity },
     scout: { costEnergy: 30, costCrystal: 0, hp: 5, speed: 2, vision: 9, carry: 0, harvest: 0, damage: 1, range: 1, canBuild: false, canTransform: false, leash: Infinity },
     stemCell: { costEnergy: 25, costCrystal: 0, hp: 5, speed: 1, vision: 5, carry: 10, harvest: 5, damage: 0, range: 0, canBuild: true, canTransform: true, leash: Infinity },
-    immuneCell: { costEnergy: 0, costCrystal: 20, hp: 20, speed: 2, vision: 5, carry: 0, harvest: 0, damage: 3, range: 1, canBuild: false, canTransform: false, leash: 8 },
+    immuneCell: { costEnergy: 0, costCrystal: 15, hp: 20, speed: 2, vision: 5, carry: 0, harvest: 0, damage: 3, range: 1, canBuild: false, canTransform: false, leash: 8 },
   },
 
   /**

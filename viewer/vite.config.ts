@@ -5,6 +5,7 @@ import { defineConfig, type Plugin } from "vite";
 /**
  * `import src from "../bots/greedy.js?bot"` → the bot bundled (with its lib imports)
  * into one ES module, as a string. The browser sandbox runs it exactly like pasted code.
+ * `import ... from "arena"` stays as is: the sandbox resolves it, as it does for pasted code.
  */
 function botBundle(): Plugin {
   return {
@@ -17,7 +18,7 @@ function botBundle(): Plugin {
     async load(id) {
       if (!id.endsWith("?bot")) return null;
       const file = id.slice(0, -4);
-      const out = await build({ entryPoints: [file], bundle: true, format: "esm", write: false, platform: "neutral", metafile: true });
+      const out = await build({ entryPoints: [file], bundle: true, format: "esm", write: false, platform: "neutral", metafile: true, external: ["arena"] });
       for (const input of Object.keys(out.metafile!.inputs)) this.addWatchFile(path.resolve(input));
       return `export default ${JSON.stringify(out.outputFiles[0]!.text)};`;
     },

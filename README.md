@@ -8,7 +8,7 @@ This file is the whole manual and the only rules document. It is self-contained:
 and ask for a bot. Every number in it comes from `engine/src/config.ts` (or, for the ladder, the server's
 constants) and is checked by a test.
 
-**Rules version <!--v CONFIG_VERSION-->4.7.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
+**Rules version <!--v CONFIG_VERSION-->4.9.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
 
 ## Writing a bot
 
@@ -117,7 +117,7 @@ The simulation is deterministic: the same seed and the same bot actions always p
 - **Score** (the tiebreak, and the ladder's high score) =
   <!--v score.energyWeight-->1<!--/v--> × banked energy + <!--v score.crystalWeight-->3<!--/v--> × banked crystal + <!--v score.unitValueWeight-->1<!--/v--> × value of living units + <!--v score.baseHpWeight-->2<!--/v--> × total HP of surviving friendly bases.
   A unit's value is its spawn cost with the same resource weights (worker <!--v units.worker.costEnergy * score.energyWeight + units.worker.costCrystal * score.crystalWeight-->50<!--/v-->, fighter <!--v units.fighter.costEnergy * score.energyWeight + units.fighter.costCrystal * score.crystalWeight-->105<!--/v-->, scout <!--v units.scout.costEnergy * score.energyWeight + units.scout.costCrystal * score.crystalWeight-->30<!--/v-->,
-  Stem Cell <!--v units.stemCell.costEnergy * score.energyWeight + units.stemCell.costCrystal * score.crystalWeight-->25<!--/v-->, Immune Cell <!--v units.immuneCell.costEnergy * score.energyWeight + units.immuneCell.costCrystal * score.crystalWeight-->60<!--/v-->).
+  Stem Cell <!--v units.stemCell.costEnergy * score.energyWeight + units.stemCell.costCrystal * score.crystalWeight-->25<!--/v-->, Immune Cell <!--v units.immuneCell.costEnergy * score.energyWeight + units.immuneCell.costCrystal * score.crystalWeight-->45<!--/v-->).
   Cargo that hasn't been deposited and structures don't count.
 - **Forfeit**: a bot that fails <!--v bot.maxConsecutiveFailures-->10<!--/v--> ticks in a row loses.
 
@@ -136,7 +136,7 @@ differs from the classic one in these ways:
 
 - **Tumor Cells are its bases.** Everything that applies to bases applies to them: deposits, spawning, the win
   condition, score (<!--v score.baseHpWeight-->2<!--/v--> × HP) and zone immunity. The starting Tumor Cell has
-  <!--v races.tumor.base.hp-->30<!--/v--> HP like every other. A Tumor Cell shoots the lowest-HP enemy unit within
+  <!--v races.tumor.base.hp-->50<!--/v--> HP like every other. A Tumor Cell shoots the lowest-HP enemy unit within
   <!--v races.tumor.base.range-->3<!--/v--> for <!--v races.tumor.base.damage-->1<!--/v--> damage every tick. Like a turret,
   it never targets upgraded fighters.
 - **New Tumor Cells come from Stem Cells.** `{ type: "transform", unitId }` turns a Stem Cell into a Tumor Cell
@@ -184,7 +184,7 @@ differs from the classic one in these ways:
 | Fighter | Classic | 60 E + 15 C | 30 | 1 | 5 | 6 dmg, range 1 | – | – | – |
 | Scout | Classic | 30 E | 5 | 2 | 9 | 1 dmg, range 1 | – | – | – |
 | Stem Cell | Tumor | 25 E | 5 | 1 | 5 | – | 10 | 5/tick | yes; transforms into a Tumor Cell |
-| Immune Cell | Tumor | 20 C | 20 | 2 | 5 | 3 dmg, range 1 | – | – | – |
+| Immune Cell | Tumor | 15 C | 20 | 2 | 5 | 3 dmg, range 1 | – | – | – |
 <!--/table-->
 
 E = energy, C = crystal. A spawn or build needs the full cost in both resources.
@@ -206,7 +206,7 @@ E = energy, C = crystal. A spawn or build needs the full cost in both resources.
 | Purification Cell | Tumor | 50 E | 100 | 10 | heals friendly units and buildings in range 5 by 1 HP/tick | within 8 of a living friendly base |
 | Siege Cell | Tumor | 75 E | 100 | 16 | 1 dmg, range 6 (automatic, structures and bases only) | within 8 of a living friendly base |
 | Base | Classic | 100 E + 50 C | 200 | 7 | – | anywhere (built by a worker) |
-| Tumor Cell (base) | Tumor | 75 E | 30 | 10 | 1 dmg, range 3 (automatic, units only) | anywhere (a Stem Cell transforms) |
+| Tumor Cell (base) | Tumor | 75 E | 50 | 10 | 1 dmg, range 3 (automatic, units only) | anywhere (a Stem Cell transforms) |
 <!--/table-->
 
 A worker (Worker or Stem Cell) builds a structure of its race on an empty floor tile adjacent to it. Building

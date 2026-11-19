@@ -11,7 +11,7 @@ export const COSTS = {
   base: { energy: 100, crystal: 50 },
   // Tumor race
   stemCell: { energy: 25, crystal: 0 },
-  immuneCell: { energy: 0, crystal: 20 },
+  immuneCell: { energy: 0, crystal: 15 },
   purificationCell: { energy: 50, crystal: 0 },
   siegeCell: { energy: 75, crystal: 0 },
   /** What a Stem Cell's `transform` costs. */

@@ -15,11 +15,13 @@ import DenaivamFortress from "../../bots/denaivam/DenaivamFortress.mjs?bot";
 import DenaivamCitadel from "../../bots/denaivam/DenaivamCitadel.mjs?bot";
 import DenaivamDecoy from "../../bots/denaivam/DenaivamDecoy.mjs?bot";
 import DenaivamPhalanx from "../../bots/denaivam/DenaivamPhalanx.mjs?bot";
+import DenaivamTumor from "../../bots/denaivam/DenaivamTumor.mjs?bot";
+import DenaivamTumorHunter from "../../bots/denaivam/DenaivamTumorHunter.mjs?bot";
 
 /** Sample bots, each bundled into a single module so the browser sandbox runs them like pasted code. */
 export const SAMPLE_BOTS: Record<string, string> = { greedy, rusher, balanced, aggressor, tumor, starter, idle };
 
-/** Denaivam's own bots, offered as opponents in their own group. All play the classic race. */
+/** Denaivam's own bots, offered as opponents in their own group. All play the classic race except DenaivamTumor (Tumor race); DenaivamTumorHunter is classic but hunts Tumor buildings. */
 export const DENAIVAM_BOTS: Record<string, string> = {
   DenaivamMaikaTi,
   DenaivamApex,
@@ -29,6 +31,8 @@ export const DENAIVAM_BOTS: Record<string, string> = {
   DenaivamCitadel,
   DenaivamDecoy,
   DenaivamPhalanx,
+  DenaivamTumor,
+  DenaivamTumorHunter,
 };
 
 /** Source of a local opponent (sample or Denaivam bot), or undefined. */

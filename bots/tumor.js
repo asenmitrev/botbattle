@@ -29,7 +29,7 @@ const UPGRADE_ORDER = [
   ["tumorSpeed", 6],
   ["freedom", 8],
 ];
-const COST = { stemCell: 25, immuneCell: 20, tumorCell: 75, purificationCell: 50, siegeCell: 75 };
+const COST = { stemCell: 25, immuneCell: 15, tumorCell: 75, purificationCell: 50, siegeCell: 75 };
 
 export function onTick(state, memory) {
   const actions = [];
