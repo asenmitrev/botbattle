@@ -6,10 +6,10 @@
 //   2. A Stem Cell grows a Tumor Cell next to each crystal node we find (short trips, more spawn points),
 //      and another near the map center before the zone shrinks.
 //   3. Upgrades: Photosynthesis → Toxic → Tumor Speed → Freedom.
-//   4. A Purification Cell guards home. Immune Cells defend inside their leash, then attack in a pack once
+//   4. A Purification Cell guards home. Immune Cells defend inside their 8-tile leash, then attack in a pack once
 //      Freedom is bought.
 //   5. Siege push: a Tumor Cell grows ~12 tiles from the enemy base and Siege Cells go up beside it.
-import { distance, enemyBasePos, inSafeZone, pathTo, rememberMap } from "./lib/helpers.js";
+import { distance, enemyBasePos, inSafeZone, pathTo, rememberMap, UPGRADE_COSTS } from "./lib/helpers.js";
 
 export const race = "tumor";
 
@@ -22,14 +22,14 @@ const SIEGE_CELLS = 2;
 const ATTACK_SIZE = 10;
 const RETREAT_SIZE = 3;
 const DEFENSE_RADIUS = 10;
-/** Upgrades in order: [name, crystal cost, Immune Cells needed before buying it]. Army comes before upgrades. */
+/** Upgrades in order: [name, Immune Cells needed before buying it]. Army comes before upgrades. */
 const UPGRADE_ORDER = [
-  ["photosynthesis", 20, 0],
-  ["toxic", 20, 4],
-  ["tumorSpeed", 15, 6],
-  ["freedom", 15, 8],
+  ["photosynthesis", 0],
+  ["toxic", 4],
+  ["tumorSpeed", 6],
+  ["freedom", 8],
 ];
-const COST = { stemCell: 25, immuneCell: 20, tumorCell: 50, purificationCell: 50, siegeCell: 150 };
+const COST = { stemCell: 25, immuneCell: 20, tumorCell: 75, purificationCell: 50, siegeCell: 75 };
 
 export function onTick(state, memory) {
   const actions = [];
@@ -47,11 +47,13 @@ export function onTick(state, memory) {
   const used = new Set(); // units that already have an action this tick
 
   // ---------------------------------------------------------------- upgrades
-  for (const [up, cost, army] of UPGRADE_ORDER) {
+  for (const [up, army] of UPGRADE_ORDER) {
     if (state.myUpgrades[up]) continue;
-    if (immune.length >= army && bank.crystal >= cost) {
+    const cost = UPGRADE_COSTS[up];
+    if (immune.length >= army && bank.crystal >= cost.crystal && bank.energy >= cost.energy) {
       actions.push({ type: "upgrade", upgrade: up });
-      bank.crystal -= cost;
+      bank.crystal -= cost.crystal;
+      bank.energy -= cost.energy;
     }
     break; // buy strictly in order
   }
@@ -204,7 +206,7 @@ export function onTick(state, memory) {
 /** Crystal kept back for the next upgrade once the army is big enough for it, so Immune Cells don't eat it all. */
 function nextUpgradeReserve(state, armySize) {
   const next = UPGRADE_ORDER.find(([up]) => !state.myUpgrades[up]);
-  return next && armySize >= next[2] ? next[1] : 0;
+  return next && armySize >= next[1] ? UPGRADE_COSTS[next[0]].crystal : 0;
 }
 
 function observe(state, memory) {

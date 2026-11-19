@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: [".claude/**", "**/node_modules/**", "**/dist/**", "data/**", "data-backup-*/**", "replays/**", "botbattle/**", "sandbox/test/fixtures/**"],
+    ignores: [".claude/**", "**/node_modules/**", "**/dist/**", "data/**", "data-backup-*/**", "replays/**", "botbattle/**", "bots/denaivam/**", "sandbox/test/fixtures/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

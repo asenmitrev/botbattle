@@ -18,7 +18,7 @@ const addStructure = (s: GameState, owner: 1 | 2, type: Structure["type"], x: nu
 };
 
 describe("races", () => {
-  it("a Tumor player starts with a 50-HP Tumor Cell and two Stem Cells", () => {
+  it("a Tumor player starts with a 30-HP Tumor Cell and two Stem Cells", () => {
     const s = createInitialState(7, ["tumor", "classic"]);
     expect(s.players.map((p) => p.race)).toEqual(["tumor", "classic"]);
     expect(s.bases.map((b) => b.hp)).toEqual([T.base.hp, CONFIG.races.classic.base.hp]);
@@ -82,7 +82,7 @@ describe("races", () => {
 });
 
 describe("Tumor: transform", () => {
-  it("turns a Stem Cell into a 50-HP Tumor Cell on its own tile, anywhere, for 50 energy", () => {
+  it("turns a Stem Cell into a 30-HP Tumor Cell on its own tile, anywhere, for 75 energy", () => {
     const s = tumorState();
     const stem = addUnit(s, 1, "stemCell", 30, 20, { cargo: { energy: 5, crystal: 0 } });
     const before = s.players[0].energy;
@@ -124,13 +124,13 @@ describe("Tumor: placement", () => {
 });
 
 describe("Tumor: Immune Cell leash and upgrades", () => {
-  it("can't step more than 16 from its nearest Tumor Cell, but can step back", () => {
+  it("can't step more than 8 from its nearest Tumor Cell, but can step back", () => {
     const s = tumorState();
-    const out = addUnit(s, 1, "immuneCell", 20, 4); // 16 from (4,4)
+    const out = addUnit(s, 1, "immuneCell", 12, 4); // 8 from (4,4)
     const r = step(s, [{ type: "move", unitId: out.id, dir: "E" }], []);
-    expect(unit(r.state, out.id)).toMatchObject({ x: 20, y: 4 });
+    expect(unit(r.state, out.id)).toMatchObject({ x: 12, y: 4 });
     const back = step(r.state, [{ type: "move", unitId: out.id, dir: "W" }], []);
-    expect(unit(back.state, out.id)).toMatchObject({ x: 18, y: 4 }); // speed 2
+    expect(unit(back.state, out.id)).toMatchObject({ x: 10, y: 4 }); // speed 2
   });
 
   it("a stranded Immune Cell can walk home but not farther away", () => {
@@ -209,16 +209,16 @@ describe("Tumor: automatic attacks", () => {
 });
 
 describe("Tumor: healing and Photosynthesis", () => {
-  it("a Purification Cell heals friendly units, structures and Tumor Cells within 3 by 1, up to max HP", () => {
+  it("a Purification Cell heals friendly units, structures and Tumor Cells within 5 by 1, up to max HP", () => {
     const s = tumorState();
-    s.bases[0]!.hp = 40;
+    s.bases[0]!.hp = 20;
     const pur = addStructure(s, 1, "purificationCell", 6, 6, 90);
     const hurt = addUnit(s, 1, "immuneCell", 8, 8, { hp: 10 });
     const full = addUnit(s, 1, "stemCell", 7, 7);
-    const far = addUnit(s, 1, "immuneCell", 10, 6, { hp: 10 });
+    const far = addUnit(s, 1, "immuneCell", 12, 6, { hp: 10 });
     const enemy = addUnit(s, 2, "scout", 9, 6, { hp: 1 });
     const r = step(s, [], []);
-    expect(r.state.bases[0]!.hp).toBe(41);
+    expect(r.state.bases[0]!.hp).toBe(21);
     expect(r.state.structures[0]!.hp).toBe(91);
     expect(unit(r.state, hurt.id)!.hp).toBe(11);
     expect(unit(r.state, full.id)!.hp).toBe(CONFIG.units.stemCell.hp);
@@ -227,15 +227,16 @@ describe("Tumor: healing and Photosynthesis", () => {
     expect(r.events.filter((e) => e.type === "heal").map((e) => (e as { targetId: number }).targetId)).toEqual([1, pur.id, hurt.id]);
   });
 
-  it("two Purification Cells heal twice, and healing never passes max HP", () => {
+  it("heals don't stack: two Purification Cells in range still heal 1, and never past max HP", () => {
     const s = tumorState();
-    addStructure(s, 1, "purificationCell", 10, 10);
+    const first = addStructure(s, 1, "purificationCell", 10, 10);
     addStructure(s, 1, "purificationCell", 12, 10);
     const a = addUnit(s, 1, "immuneCell", 11, 11, { hp: 10 });
-    const b = addUnit(s, 1, "immuneCell", 11, 12, { hp: 19 });
+    const b = addUnit(s, 1, "immuneCell", 11, 12, { hp: 20 });
     const r = step(s, [], []);
-    expect(unit(r.state, a.id)!.hp).toBe(12);
+    expect(unit(r.state, a.id)!.hp).toBe(11);
     expect(unit(r.state, b.id)!.hp).toBe(20);
+    expect(r.events.filter((e) => e.type === "heal" && e.targetId === a.id)).toEqual([{ type: "heal", healerId: first.id, targetId: a.id, amount: 1 }]);
   });
 
   it("Photosynthesis adds 3 energy every tick", () => {

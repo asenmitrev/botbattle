@@ -674,25 +674,29 @@ function removeDead(state: GameState, events: GameEvent[]): void {
 
 /**
  * Healing structures restore HP to every friendly unit, structure and living base within range, up to its
- * max HP. Healers act in ID order and each heals separately, so two healers in range heal twice as fast.
+ * max HP. Heals don't stack: each target is healed once per tick, by the in-range healer that heals most
+ * (ties to the lowest ID), however many healers reach it.
  */
 function applyHealing(state: GameState, events: GameEvent[]): void {
   type Healable = { id: number; owner: PlayerId; x: number; y: number; hp: number };
-  const healers = state.structures.filter((s) => CONFIG.structures[s.type].heal > 0);
+  const healers = state.structures.filter((s) => CONFIG.structures[s.type].heal > 0).sort((a, b) => a.id - b.id);
   if (!healers.length) return;
   const all: { e: Healable; max: number }[] = [
     ...state.units.map((u) => ({ e: u as Healable, max: maxHp(u) })),
     ...state.structures.map((x: Structure) => ({ e: x as Healable, max: maxHp(x) })),
     ...state.bases.filter((b) => b.hp > 0).map((b) => ({ e: b as Healable, max: baseSpec(raceOf(state, b.owner)).hp })),
   ].sort((a, b) => a.e.id - b.e.id);
-  for (const h of healers.sort((a, b) => a.id - b.id)) {
-    const sc = CONFIG.structures[h.type];
-    for (const { e, max } of all) {
-      if (e.owner !== h.owner || e.hp >= max || chebyshev(e, h) > sc.range) continue;
-      const amount = Math.min(sc.heal, max - e.hp);
-      e.hp += amount;
-      events.push({ type: "heal", healerId: h.id, targetId: e.id, amount });
+  for (const { e, max } of all) {
+    if (e.hp >= max) continue;
+    let best: Structure | null = null;
+    for (const h of healers) {
+      if (h.owner !== e.owner || chebyshev(e, h) > CONFIG.structures[h.type].range) continue;
+      if (!best || CONFIG.structures[h.type].heal > CONFIG.structures[best.type].heal) best = h;
     }
+    if (!best) continue;
+    const amount = Math.min(CONFIG.structures[best.type].heal, max - e.hp);
+    e.hp += amount;
+    events.push({ type: "heal", healerId: best.id, targetId: e.id, amount });
   }
 }
 

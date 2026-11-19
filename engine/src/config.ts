@@ -2,7 +2,7 @@
 // (`pnpm readme`; a test fails while they are stale). Bump CONFIG_VERSION whenever any value below
 // or any rule in step.ts changes: replays record it and only replay under the same version.
 
-export const CONFIG_VERSION = "4.2.0";
+export const CONFIG_VERSION = "4.7.0";
 
 export const CONFIG = {
   map: {
@@ -55,7 +55,7 @@ export const CONFIG = {
     },
     tumor: {
       /** The Tumor Cell. It shoots the lowest-HP enemy unit in range, like a turret (and skips upgraded fighters). */
-      base: { costEnergy: 50, costCrystal: 0, hp: 50, vision: 10, damage: 1, range: 3, maxDistFromBase: Infinity },
+      base: { costEnergy: 75, costCrystal: 0, hp: 30, vision: 10, damage: 1, range: 3, maxDistFromBase: Infinity },
       worker: "stemCell",
       units: ["stemCell", "immuneCell"],
       structures: ["purificationCell", "siegeCell"],
@@ -74,19 +74,19 @@ export const CONFIG = {
     fighter: { costEnergy: 60, costCrystal: 15, hp: 30, speed: 1, vision: 5, carry: 0, harvest: 0, damage: 6, range: 1, canBuild: false, canTransform: false, leash: Infinity },
     scout: { costEnergy: 30, costCrystal: 0, hp: 5, speed: 2, vision: 9, carry: 0, harvest: 0, damage: 1, range: 1, canBuild: false, canTransform: false, leash: Infinity },
     stemCell: { costEnergy: 25, costCrystal: 0, hp: 5, speed: 1, vision: 5, carry: 10, harvest: 5, damage: 0, range: 0, canBuild: true, canTransform: true, leash: Infinity },
-    immuneCell: { costEnergy: 0, costCrystal: 20, hp: 20, speed: 2, vision: 5, carry: 0, harvest: 0, damage: 3, range: 1, canBuild: false, canTransform: false, leash: 16 },
+    immuneCell: { costEnergy: 0, costCrystal: 20, hp: 20, speed: 2, vision: 5, carry: 0, harvest: 0, damage: 3, range: 1, canBuild: false, canTransform: false, leash: 8 },
   },
 
   /**
    * Every structure of every race. `targets`: what its automatic attack shoots ("units": the lowest-HP enemy
    * unit; "buildings": the lowest-HP enemy structure or base). `heal`: HP restored per tick to every friendly
-   * unit, structure and base within `range`. `maxDistFromBase`: placement limit from a living friendly base.
+   * unit, structure and base within `range` (heals don't stack: one healer per target per tick). `maxDistFromBase`: placement limit from a living friendly base.
    */
   structures: {
     turret: { costEnergy: 100, costCrystal: 0, hp: 50, damage: 4, range: 4, vision: 4, maxDistFromBase: 8, targets: "units", heal: 0 },
     wall: { costEnergy: 3, costCrystal: 0, hp: 60, damage: 0, range: 0, vision: 0, maxDistFromBase: Infinity, targets: "none", heal: 0 },
-    purificationCell: { costEnergy: 50, costCrystal: 0, hp: 100, damage: 0, range: 3, vision: 10, maxDistFromBase: 8, targets: "none", heal: 1 },
-    siegeCell: { costEnergy: 150, costCrystal: 0, hp: 100, damage: 1, range: 6, vision: 16, maxDistFromBase: 8, targets: "buildings", heal: 0 },
+    purificationCell: { costEnergy: 50, costCrystal: 0, hp: 100, damage: 0, range: 5, vision: 10, maxDistFromBase: 8, targets: "none", heal: 1 },
+    siegeCell: { costEnergy: 75, costCrystal: 0, hp: 100, damage: 1, range: 6, vision: 16, maxDistFromBase: 8, targets: "buildings", heal: 0 },
   },
 
   nodes: {
@@ -104,9 +104,9 @@ export const CONFIG = {
     scout: { appliesTo: "scout", costEnergy: 0, costCrystal: 15, speedMultiplier: 2, hpMultiplier: 2 },
     wall: { appliesTo: "wall", costEnergy: 50, costCrystal: 0, hpMultiplier: 2 },
     fighter: { appliesTo: "fighter", costEnergy: 0, costCrystal: 20, turretImmune: true },
-    tumorSpeed: { appliesTo: null, costEnergy: 0, costCrystal: 15, buildRangeMultiplier: 2 },
+    tumorSpeed: { appliesTo: null, costEnergy: 100, costCrystal: 0, buildRangeMultiplier: 2 },
     photosynthesis: { appliesTo: null, costEnergy: 0, costCrystal: 20, energyPerTick: 3 },
-    freedom: { appliesTo: "immuneCell", costEnergy: 0, costCrystal: 15, unleashed: true },
+    freedom: { appliesTo: "immuneCell", costEnergy: 150, costCrystal: 0, unleashed: true },
     toxic: { appliesTo: "immuneCell", costEnergy: 0, costCrystal: 20, rangeBonus: 1 },
   },
 

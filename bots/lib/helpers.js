@@ -13,9 +13,9 @@ export const COSTS = {
   stemCell: { energy: 25, crystal: 0 },
   immuneCell: { energy: 0, crystal: 20 },
   purificationCell: { energy: 50, crystal: 0 },
-  siegeCell: { energy: 150, crystal: 0 },
+  siegeCell: { energy: 75, crystal: 0 },
   /** What a Stem Cell's `transform` costs. */
-  tumorCell: { energy: 50, crystal: 0 },
+  tumorCell: { energy: 75, crystal: 0 },
 };
 
 /** Upgrade costs, by upgrade name (bought once; only your race's upgrades can be bought). */
@@ -23,9 +23,9 @@ export const UPGRADE_COSTS = {
   scout: { energy: 0, crystal: 15 },
   wall: { energy: 50, crystal: 0 },
   fighter: { energy: 0, crystal: 20 },
-  tumorSpeed: { energy: 0, crystal: 15 },
+  tumorSpeed: { energy: 100, crystal: 0 },
   photosynthesis: { energy: 0, crystal: 20 },
-  freedom: { energy: 0, crystal: 15 },
+  freedom: { energy: 150, crystal: 0 },
   toxic: { energy: 0, crystal: 20 },
 };
 

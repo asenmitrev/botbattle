@@ -8,7 +8,7 @@ This file is the whole manual and the only rules document. It is self-contained:
 and ask for a bot. Every number in it comes from `engine/src/config.ts` (or, for the ladder, the server's
 constants) and is checked by a test.
 
-**Rules version <!--v CONFIG_VERSION-->4.2.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
+**Rules version <!--v CONFIG_VERSION-->4.7.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
 
 ## Writing a bot
 
@@ -136,24 +136,25 @@ differs from the classic one in these ways:
 
 - **Tumor Cells are its bases.** Everything that applies to bases applies to them: deposits, spawning, the win
   condition, score (<!--v score.baseHpWeight-->2<!--/v--> × HP) and zone immunity. The starting Tumor Cell has
-  <!--v races.tumor.base.hp-->50<!--/v--> HP like every other. A Tumor Cell shoots the lowest-HP enemy unit within
+  <!--v races.tumor.base.hp-->30<!--/v--> HP like every other. A Tumor Cell shoots the lowest-HP enemy unit within
   <!--v races.tumor.base.range-->3<!--/v--> for <!--v races.tumor.base.damage-->1<!--/v--> damage every tick. Like a turret,
   it never targets upgraded fighters.
 - **New Tumor Cells come from Stem Cells.** `{ type: "transform", unitId }` turns a Stem Cell into a Tumor Cell
-  on its own tile, anywhere on the map, for <!--v races.tumor.base.costEnergy-->50<!--/v--> E. The Stem Cell is
+  on its own tile, anywhere on the map, for <!--v races.tumor.base.costEnergy-->75<!--/v--> E. The Stem Cell is
   gone (with any cargo it carried) and isn't counted as a death. It happens in the build phase, is paid with
   builds in unit-ID order, and the new Tumor Cell spawns and accepts deposits from the next tick. Stem Cells
   can't `build` a base.
 - **Placement**: Purification and Siege Cells go within <!--v structures.purificationCell.maxDistFromBase-->8<!--/v--> of
   a living Tumor Cell, or <!--v structures.purificationCell.maxDistFromBase * upgrades.tumorSpeed.buildRangeMultiplier-->16<!--/v-->
   with Tumor Speed.
-- **Leash**: an Immune Cell can't step to a tile more than <!--v units.immuneCell.leash-->16<!--/v--> from its nearest
+- **Leash**: an Immune Cell can't step to a tile more than <!--v units.immuneCell.leash-->8<!--/v--> from its nearest
   living Tumor Cell, unless that step brings it no farther from one (so a cell stranded by a lost Tumor Cell
   can still walk home). A blocked step just doesn't happen, like a step into a wall; `moveTo` paths ignore
   the leash. Adaptation Freedom removes it.
 - **Healing**: after combat, each Purification Cell restores <!--v structures.purificationCell.heal-->1<!--/v--> HP to every
-  friendly unit, structure and Tumor Cell within <!--v structures.purificationCell.range-->3<!--/v--> (itself included), up to
-  max HP. Cells heal separately, so two in range heal twice as fast. Each heal is a `heal` event.
+  friendly unit, structure and Tumor Cell within <!--v structures.purificationCell.range-->5<!--/v--> (itself included), up to
+  max HP. Heals don't stack: a target in range of several Purification Cells is still healed once per tick.
+  Each heal is a `heal` event.
 - **Siege Cells** shoot the lowest-HP enemy structure or base within <!--v structures.siegeCell.range-->6<!--/v--> (ties →
   lowest ID). They never shoot units.
 - **Photosynthesis** adds <!--v upgrades.photosynthesis.energyPerTick-->3<!--/v--> energy to the bank every tick, with no worker.
@@ -202,10 +203,10 @@ E = energy, C = crystal. A spawn or build needs the full cost in both resources.
 | --- | --- | --- | --- | --- | --- | --- |
 | Turret | Classic | 100 E | 50 | 4 | 4 dmg, range 4 (automatic, units only) | within 8 of a living friendly base |
 | Wall | Classic | 3 E | 60 | – | – | anywhere |
-| Purification Cell | Tumor | 50 E | 100 | 10 | heals friendly units and buildings in range 3 by 1 HP/tick | within 8 of a living friendly base |
-| Siege Cell | Tumor | 150 E | 100 | 16 | 1 dmg, range 6 (automatic, structures and bases only) | within 8 of a living friendly base |
+| Purification Cell | Tumor | 50 E | 100 | 10 | heals friendly units and buildings in range 5 by 1 HP/tick | within 8 of a living friendly base |
+| Siege Cell | Tumor | 75 E | 100 | 16 | 1 dmg, range 6 (automatic, structures and bases only) | within 8 of a living friendly base |
 | Base | Classic | 100 E + 50 C | 200 | 7 | – | anywhere (built by a worker) |
-| Tumor Cell (base) | Tumor | 50 E | 50 | 10 | 1 dmg, range 3 (automatic, units only) | anywhere (a Stem Cell transforms) |
+| Tumor Cell (base) | Tumor | 75 E | 30 | 10 | 1 dmg, range 3 (automatic, units only) | anywhere (a Stem Cell transforms) |
 <!--/table-->
 
 A worker (Worker or Stem Cell) builds a structure of its race on an empty floor tile adjacent to it. Building
@@ -233,9 +234,9 @@ is instant and paid from banked resources.
 | Scout | `"scout"` | Classic | 15 C | Scout speed 2 → 4; Scout max HP 5 → 10 |
 | Wall | `"wall"` | Classic | 50 E | Wall max HP 60 → 120 |
 | Fighter | `"fighter"` | Classic | 20 C | Fighters are immune to all building attacks: turrets and Tumor Cells never target them and shoot other units instead |
-| Tumor Speed | `"tumorSpeed"` | Tumor | 15 C | structure placement range ×2 (8 → 16 for Tumor structures) |
+| Tumor Speed | `"tumorSpeed"` | Tumor | 100 E | structure placement range ×2 (8 → 16 for Tumor structures) |
 | Photosynthesis | `"photosynthesis"` | Tumor | 20 C | +3 energy per tick, banked directly |
-| Freedom | `"freedom"` | Tumor | 15 C | Immune Cells lose their leash and can move anywhere |
+| Freedom | `"freedom"` | Tumor | 150 E | Immune Cells lose their leash and can move anywhere |
 | Toxic | `"toxic"` | Tumor | 20 C | Immune Cell attack range 1 → 2 |
 <!--/table-->
 
@@ -307,7 +308,7 @@ The engine runs `step(state, actionsP1, actionsP2) → { state, events }`:
    applied at once.
 6. **Remove dead** units and structures (HP ≤ 0) and deactivate destroyed bases. If a player has no living
    base the match ends now and phase 7 is skipped.
-7. **Node regeneration**, then Photosynthesis income, then **healing** (Purification Cells, in ID order), then
+7. **Node regeneration**, then Photosynthesis income, then **healing** (one heal per target), then
    **zone damage**, then remove anything the zone killed.
 8. **Vision** is derived from the new state for the next tick's bot views. After the last tick the match ends
    on living unit counts, then score.

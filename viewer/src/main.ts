@@ -18,7 +18,7 @@ import {
   type Replay,
 } from "@arena/engine";
 import readmeSource from "../../README.md?raw";
-import { SAMPLE_BOTS, STARTER_SOURCE } from "./bots.js";
+import { DENAIVAM_BOTS, localBotSource, SAMPLE_BOTS, STARTER_SOURCE } from "./bots.js";
 import { LineChart } from "./charts.js";
 import { createEditor } from "./editor.js";
 import { BoardRenderer, type RenderOptions } from "./renderer.js";
@@ -128,7 +128,11 @@ const houseGroup = document.createElement("optgroup");
 houseGroup.label = "House bots";
 for (const name of Object.keys(SAMPLE_BOTS)) houseGroup.append(new Option(name, name));
 opponentSel.append(houseGroup);
-opponentSel.value = settings.opponent && SAMPLE_BOTS[settings.opponent] ? settings.opponent : "greedy";
+const denaivamGroup = document.createElement("optgroup");
+denaivamGroup.label = "Denaivam's bots";
+for (const name of Object.keys(DENAIVAM_BOTS)) denaivamGroup.append(new Option(name, name));
+opponentSel.append(denaivamGroup);
+opponentSel.value = settings.opponent && localBotSource(settings.opponent) ? settings.opponent : "greedy";
 
 // Ladder (user) bots join the list when the page is served by `arena server`. Value: "ladder:<id>".
 const LADDER_PREFIX = "ladder:";
@@ -194,7 +198,7 @@ async function playMatch(seed: number, side: PlayerId, opponentValue: string, on
   const opponent = opponentName(opponentValue);
   const mine = await WorkerBot.create("my-bot", code, (seed * 2 + side) >>> 0);
   const other = side === 1 ? 2 : 1;
-  const theirs = await WorkerBot.create(opponent, SAMPLE_BOTS[opponentValue]!, (seed * 2 + other) >>> 0);
+  const theirs = await WorkerBot.create(opponent, localBotSource(opponentValue)!, (seed * 2 + other) >>> 0);
   try {
     if (mine.initError) return { initError: mine.initError };
     const bots = side === 1 ? ([mine, theirs] as const) : ([theirs, mine] as const);
