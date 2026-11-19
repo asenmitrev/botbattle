@@ -15,7 +15,7 @@ export const COSTS = {
   purificationCell: { energy: 50, crystal: 0 },
   siegeCell: { energy: 75, crystal: 0 },
   /** What a Stem Cell's `transform` costs. */
-  tumorCell: { energy: 75, crystal: 0 },
+  tumorCell: { energy: 50, crystal: 0 },
 };
 
 /** Upgrade costs, by upgrade name (bought once; only your race's upgrades can be bought). */

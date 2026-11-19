@@ -82,7 +82,7 @@ describe("races", () => {
 });
 
 describe("Tumor: transform", () => {
-  it("turns a Stem Cell into a 30-HP Tumor Cell on its own tile, anywhere, for 75 energy", () => {
+  it("turns a Stem Cell into a Tumor Cell on its own tile, anywhere, for its energy cost", () => {
     const s = tumorState();
     const stem = addUnit(s, 1, "stemCell", 30, 20, { cargo: { energy: 5, crystal: 0 } });
     const before = s.players[0].energy;

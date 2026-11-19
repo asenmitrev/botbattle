@@ -8,7 +8,7 @@ This file is the whole manual and the only rules document. It is self-contained:
 and ask for a bot. Every number in it comes from `engine/src/config.ts` (or, for the ladder, the server's
 constants) and is checked by a test.
 
-**Rules version <!--v CONFIG_VERSION-->4.9.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
+**Rules version <!--v CONFIG_VERSION-->4.10.0<!--/v-->** (`CONFIG_VERSION`; replays record it).
 
 ## Writing a bot
 
@@ -140,7 +140,7 @@ differs from the classic one in these ways:
   <!--v races.tumor.base.range-->3<!--/v--> for <!--v races.tumor.base.damage-->1<!--/v--> damage every tick. Like a turret,
   it never targets upgraded fighters.
 - **New Tumor Cells come from Stem Cells.** `{ type: "transform", unitId }` turns a Stem Cell into a Tumor Cell
-  on its own tile, anywhere on the map, for <!--v races.tumor.base.costEnergy-->75<!--/v--> E. The Stem Cell is
+  on its own tile, anywhere on the map, for <!--v races.tumor.base.costEnergy-->50<!--/v--> E. The Stem Cell is
   gone (with any cargo it carried) and isn't counted as a death. It happens in the build phase, is paid with
   builds in unit-ID order, and the new Tumor Cell spawns and accepts deposits from the next tick. Stem Cells
   can't `build` a base.
@@ -206,7 +206,7 @@ E = energy, C = crystal. A spawn or build needs the full cost in both resources.
 | Purification Cell | Tumor | 50 E | 100 | 10 | heals friendly units and buildings in range 5 by 1 HP/tick | within 8 of a living friendly base |
 | Siege Cell | Tumor | 75 E | 100 | 16 | 1 dmg, range 6 (automatic, structures and bases only) | within 8 of a living friendly base |
 | Base | Classic | 100 E + 50 C | 200 | 7 | – | anywhere (built by a worker) |
-| Tumor Cell (base) | Tumor | 75 E | 50 | 10 | 1 dmg, range 3 (automatic, units only) | anywhere (a Stem Cell transforms) |
+| Tumor Cell (base) | Tumor | 50 E | 50 | 10 | 1 dmg, range 3 (automatic, units only) | anywhere (a Stem Cell transforms) |
 <!--/table-->
 
 A worker (Worker or Stem Cell) builds a structure of its race on an empty floor tile adjacent to it. Building

@@ -2,7 +2,7 @@
 // (`pnpm readme`; a test fails while they are stale). Bump CONFIG_VERSION whenever any value below
 // or any rule in step.ts changes: replays record it and only replay under the same version.
 
-export const CONFIG_VERSION = "4.9.0";
+export const CONFIG_VERSION = "4.10.0";
 
 export const CONFIG = {
   map: {
@@ -55,7 +55,7 @@ export const CONFIG = {
     },
     tumor: {
       /** The Tumor Cell. It shoots the lowest-HP enemy unit in range, like a turret (and skips upgraded fighters). */
-      base: { costEnergy: 75, costCrystal: 0, hp: 50, vision: 10, damage: 1, range: 3, maxDistFromBase: Infinity },
+      base: { costEnergy: 50, costCrystal: 0, hp: 50, vision: 10, damage: 1, range: 3, maxDistFromBase: Infinity },
       worker: "stemCell",
       units: ["stemCell", "immuneCell"],
       structures: ["purificationCell", "siegeCell"],
