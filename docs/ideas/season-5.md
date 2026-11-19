@@ -5,9 +5,9 @@
 
 ## Summary
 
-_AI-generated on 2026-11-18 (gpt-6.1-sol); may be imperfect. Original submissions are preserved below._
+_AI-generated on 2026-11-19 (gpt-6.1-sol); may be imperfect. Original submissions are preserved below._
 
-Players want walls to cost 1 and a public betting history showing each player&#x27;s bets, wins, and losses.
+Players want walls to cost 1 and better visibility into all players’ betting histories, including bets, wins, and losses. They also want replays for every fight in x10 test mode, with a bulk download option.
 
 ### By topic
 
@@ -15,9 +15,10 @@ Players want walls to cost 1 and a public betting history showing each player&#x
 
 - [S5-001](#s5-001) стената да струва 1
 
-**🖥️ UI & Viewer** (1)
+**🖥️ UI & Viewer** (2)
 
 - [S5-002](#s5-002) да сложим история на залаганията от всички играчи за да можем да ги виждаме кой на какво е бетнал спечелил загубил и…
+- [S5-003](#s5-003) add replays for each fight in the x10 test mode and a bulk download button.
 
 
 ## Suggestions
@@ -44,4 +45,15 @@ Original submissions, verbatim.
 
 
 > да сложим история на залаганията от всички играчи за да можем да ги виждаме кой на какво е бетнал спечелил загубил и т.н.
+
+
+### S5-003
+
+- Submitted by: Iliyan-Kiro
+- Captured at (UTC): 2026-11-19T07:45:59.050366+00:00
+- Status: Proposed
+- Telegram reference: chat -1004294722012, message 2023
+
+
+> add replays for each fight in the x10 test mode and a bulk download button.
 
